@@ -1,0 +1,9 @@
+com.labpano.gpxextractor:string/service_notification_text = 0x7f030002
+com.labpano.gpxextractor:string/service_notification_title = 0x7f030003
+com.labpano.gpxextractor:string/app_name = 0x7f030000
+com.labpano.gpxextractor:mipmap/ic_launcher = 0x7f020000
+com.labpano.gpxextractor:style/AppTheme = 0x7f040000
+com.labpano.gpxextractor:string/service_channel_name = 0x7f030001
+com.labpano.gpxextractor:mipmap/ic_launcher_round = 0x7f020001
+com.labpano.gpxextractor:drawable/ic_app = 0x7f010001
+com.labpano.gpxextractor:drawable/app_icon_source = 0x7f010000

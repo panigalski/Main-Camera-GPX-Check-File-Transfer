@@ -1,0 +1,50 @@
+[
+    {
+        "merged": "com.labpano.gpxextractor.app-debug-4:/mipmap-hdpi_ic_launcher_round.png.flat",
+        "source": "com.labpano.gpxextractor.app-main-6:/mipmap-hdpi/ic_launcher_round.png"
+    },
+    {
+        "merged": "com.labpano.gpxextractor.app-debug-4:/mipmap-xhdpi_ic_launcher.png.flat",
+        "source": "com.labpano.gpxextractor.app-main-6:/mipmap-xhdpi/ic_launcher.png"
+    },
+    {
+        "merged": "com.labpano.gpxextractor.app-debug-4:/mipmap-xxhdpi_ic_launcher_round.png.flat",
+        "source": "com.labpano.gpxextractor.app-main-6:/mipmap-xxhdpi/ic_launcher_round.png"
+    },
+    {
+        "merged": "com.labpano.gpxextractor.app-debug-4:/mipmap-hdpi_ic_launcher.png.flat",
+        "source": "com.labpano.gpxextractor.app-main-6:/mipmap-hdpi/ic_launcher.png"
+    },
+    {
+        "merged": "com.labpano.gpxextractor.app-debug-4:/mipmap-xxxhdpi_ic_launcher_round.png.flat",
+        "source": "com.labpano.gpxextractor.app-main-6:/mipmap-xxxhdpi/ic_launcher_round.png"
+    },
+    {
+        "merged": "com.labpano.gpxextractor.app-debug-4:/mipmap-mdpi_ic_launcher.png.flat",
+        "source": "com.labpano.gpxextractor.app-main-6:/mipmap-mdpi/ic_launcher.png"
+    },
+    {
+        "merged": "com.labpano.gpxextractor.app-debug-4:/drawable-nodpi_app_icon_source.png.flat",
+        "source": "com.labpano.gpxextractor.app-main-6:/drawable-nodpi/app_icon_source.png"
+    },
+    {
+        "merged": "com.labpano.gpxextractor.app-debug-4:/mipmap-mdpi_ic_launcher_round.png.flat",
+        "source": "com.labpano.gpxextractor.app-main-6:/mipmap-mdpi/ic_launcher_round.png"
+    },
+    {
+        "merged": "com.labpano.gpxextractor.app-debug-4:/mipmap-xxxhdpi_ic_launcher.png.flat",
+        "source": "com.labpano.gpxextractor.app-main-6:/mipmap-xxxhdpi/ic_launcher.png"
+    },
+    {
+        "merged": "com.labpano.gpxextractor.app-debug-4:/drawable_ic_app.xml.flat",
+        "source": "com.labpano.gpxextractor.app-main-6:/drawable/ic_app.xml"
+    },
+    {
+        "merged": "com.labpano.gpxextractor.app-debug-4:/mipmap-xhdpi_ic_launcher_round.png.flat",
+        "source": "com.labpano.gpxextractor.app-main-6:/mipmap-xhdpi/ic_launcher_round.png"
+    },
+    {
+        "merged": "com.labpano.gpxextractor.app-debug-4:/mipmap-xxhdpi_ic_launcher.png.flat",
+        "source": "com.labpano.gpxextractor.app-main-6:/mipmap-xxhdpi/ic_launcher.png"
+    }
+]

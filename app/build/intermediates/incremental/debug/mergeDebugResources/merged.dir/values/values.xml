@@ -1,0 +1,14 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="app_name">Labpano GPX Extractor</string>
+    <string name="service_channel_name">Recording monitor</string>
+    <string name="service_notification_text">Monitoring recordings for completed MP4 files</string>
+    <string name="service_notification_title">Labpano GPX Extractor</string>
+    <style name="AppTheme" parent="android:style/Theme.Material.Light.NoActionBar">
+        <item name="android:fontFamily">sans</item>
+        <item name="android:colorAccent">#455A64</item>
+        <item name="android:navigationBarColor">#263238</item>
+        <item name="android:statusBarColor">#263238</item>
+        <item name="android:windowLightStatusBar">false</item>
+    </style>
+</resources>

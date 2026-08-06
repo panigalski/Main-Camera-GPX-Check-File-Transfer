@@ -1,0 +1,45 @@
+{
+    "logs": [
+        {
+            "outputFile": "com.labpano.gpxextractor.app-mergeDebugResources-2:/values/values.xml",
+            "map": [
+                {
+                    "source": "C:\\Users\\Panigalski\\Documents\\GitHub\\Main-Camera-GPX-Check-File-Transfer\\app\\src\\main\\res\\values\\styles.xml",
+                    "from": {
+                        "startLines": "1",
+                        "startColumns": "4",
+                        "startOffsets": "17",
+                        "endLines": "7",
+                        "endColumns": "12",
+                        "endOffsets": "408"
+                    },
+                    "to": {
+                        "startLines": "6",
+                        "startColumns": "4",
+                        "startOffsets": "358",
+                        "endLines": "12",
+                        "endColumns": "12",
+                        "endOffsets": "743"
+                    }
+                },
+                {
+                    "source": "C:\\Users\\Panigalski\\Documents\\GitHub\\Main-Camera-GPX-Check-File-Transfer\\app\\src\\main\\res\\values\\strings.xml",
+                    "from": {
+                        "startLines": "1,2,4,3",
+                        "startColumns": "4,4,4,4",
+                        "startOffsets": "17,77,223,145",
+                        "endColumns": "58,66,99,76",
+                        "endOffsets": "71,139,318,217"
+                    },
+                    "to": {
+                        "startLines": "2,3,4,5",
+                        "startColumns": "4,4,4,4",
+                        "startOffsets": "55,114,181,281",
+                        "endColumns": "58,66,99,76",
+                        "endOffsets": "109,176,276,353"
+                    }
+                }
+            ]
+        }
+    ]
+}

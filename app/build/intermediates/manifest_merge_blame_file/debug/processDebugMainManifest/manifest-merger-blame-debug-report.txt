@@ -1,0 +1,110 @@
+1<?xml version="1.0" encoding="utf-8"?>
+2<manifest xmlns:android="http://schemas.android.com/apk/res/android"
+3    package="com.labpano.gpxextractor"
+4    android:versionCode="31"
+5    android:versionName="0.5.8" >
+6
+7    <uses-sdk
+8        android:minSdkVersion="24"
+9        android:targetSdkVersion="28" />
+10
+11    <uses-permission android:name="android.permission.INTERNET" />
+11-->C:\Users\Panigalski\Documents\GitHub\Main-Camera-GPX-Check-File-Transfer\app\src\main\AndroidManifest.xml:4:5-67
+11-->C:\Users\Panigalski\Documents\GitHub\Main-Camera-GPX-Check-File-Transfer\app\src\main\AndroidManifest.xml:4:22-64
+12    <uses-permission android:name="android.permission.ACCESS_WIFI_STATE" />
+12-->C:\Users\Panigalski\Documents\GitHub\Main-Camera-GPX-Check-File-Transfer\app\src\main\AndroidManifest.xml:5:5-76
+12-->C:\Users\Panigalski\Documents\GitHub\Main-Camera-GPX-Check-File-Transfer\app\src\main\AndroidManifest.xml:5:22-73
+13    <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" />
+13-->C:\Users\Panigalski\Documents\GitHub\Main-Camera-GPX-Check-File-Transfer\app\src\main\AndroidManifest.xml:6:5-79
+13-->C:\Users\Panigalski\Documents\GitHub\Main-Camera-GPX-Check-File-Transfer\app\src\main\AndroidManifest.xml:6:22-76
+14    <uses-permission android:name="android.permission.READ_EXTERNAL_STORAGE" />
+14-->C:\Users\Panigalski\Documents\GitHub\Main-Camera-GPX-Check-File-Transfer\app\src\main\AndroidManifest.xml:7:5-80
+14-->C:\Users\Panigalski\Documents\GitHub\Main-Camera-GPX-Check-File-Transfer\app\src\main\AndroidManifest.xml:7:22-77
+15    <uses-permission android:name="android.permission.WRITE_EXTERNAL_STORAGE" />
+15-->C:\Users\Panigalski\Documents\GitHub\Main-Camera-GPX-Check-File-Transfer\app\src\main\AndroidManifest.xml:8:5-81
+15-->C:\Users\Panigalski\Documents\GitHub\Main-Camera-GPX-Check-File-Transfer\app\src\main\AndroidManifest.xml:8:22-78
+16    <uses-permission android:name="android.permission.RECEIVE_BOOT_COMPLETED" />
+16-->C:\Users\Panigalski\Documents\GitHub\Main-Camera-GPX-Check-File-Transfer\app\src\main\AndroidManifest.xml:9:5-81
+16-->C:\Users\Panigalski\Documents\GitHub\Main-Camera-GPX-Check-File-Transfer\app\src\main\AndroidManifest.xml:9:22-78
+17    <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
+17-->C:\Users\Panigalski\Documents\GitHub\Main-Camera-GPX-Check-File-Transfer\app\src\main\AndroidManifest.xml:10:5-77
+17-->C:\Users\Panigalski\Documents\GitHub\Main-Camera-GPX-Check-File-Transfer\app\src\main\AndroidManifest.xml:10:22-74
+18    <uses-permission android:name="android.permission.WAKE_LOCK" />
+18-->C:\Users\Panigalski\Documents\GitHub\Main-Camera-GPX-Check-File-Transfer\app\src\main\AndroidManifest.xml:11:5-68
+18-->C:\Users\Panigalski\Documents\GitHub\Main-Camera-GPX-Check-File-Transfer\app\src\main\AndroidManifest.xml:11:22-65
+19
+20    <application
+20-->C:\Users\Panigalski\Documents\GitHub\Main-Camera-GPX-Check-File-Transfer\app\src\main\AndroidManifest.xml:13:5-50:19
+21        android:name="com.labpano.gpxextractor.LabpanoApplication"
+21-->C:\Users\Panigalski\Documents\GitHub\Main-Camera-GPX-Check-File-Transfer\app\src\main\AndroidManifest.xml:14:9-43
+22        android:allowBackup="false"
+22-->C:\Users\Panigalski\Documents\GitHub\Main-Camera-GPX-Check-File-Transfer\app\src\main\AndroidManifest.xml:15:9-36
+23        android:debuggable="true"
+24        android:extractNativeLibs="false"
+25        android:icon="@mipmap/ic_launcher"
+25-->C:\Users\Panigalski\Documents\GitHub\Main-Camera-GPX-Check-File-Transfer\app\src\main\AndroidManifest.xml:16:9-43
+26        android:label="@string/app_name"
+26-->C:\Users\Panigalski\Documents\GitHub\Main-Camera-GPX-Check-File-Transfer\app\src\main\AndroidManifest.xml:18:9-41
+27        android:roundIcon="@mipmap/ic_launcher_round"
+27-->C:\Users\Panigalski\Documents\GitHub\Main-Camera-GPX-Check-File-Transfer\app\src\main\AndroidManifest.xml:17:9-54
+28        android:supportsRtl="true"
+28-->C:\Users\Panigalski\Documents\GitHub\Main-Camera-GPX-Check-File-Transfer\app\src\main\AndroidManifest.xml:19:9-35
+29        android:testOnly="true"
+30        android:theme="@style/AppTheme" >
+30-->C:\Users\Panigalski\Documents\GitHub\Main-Camera-GPX-Check-File-Transfer\app\src\main\AndroidManifest.xml:20:9-40
+31        <activity
+31-->C:\Users\Panigalski\Documents\GitHub\Main-Camera-GPX-Check-File-Transfer\app\src\main\AndroidManifest.xml:22:9-29:20
+32            android:name="com.labpano.gpxextractor.ui.MainActivity"
+32-->C:\Users\Panigalski\Documents\GitHub\Main-Camera-GPX-Check-File-Transfer\app\src\main\AndroidManifest.xml:23:13-44
+33            android:exported="true" >
+33-->C:\Users\Panigalski\Documents\GitHub\Main-Camera-GPX-Check-File-Transfer\app\src\main\AndroidManifest.xml:24:13-36
+34            <intent-filter>
+34-->C:\Users\Panigalski\Documents\GitHub\Main-Camera-GPX-Check-File-Transfer\app\src\main\AndroidManifest.xml:25:13-28:29
+35                <action android:name="android.intent.action.MAIN" />
+35-->C:\Users\Panigalski\Documents\GitHub\Main-Camera-GPX-Check-File-Transfer\app\src\main\AndroidManifest.xml:26:17-69
+35-->C:\Users\Panigalski\Documents\GitHub\Main-Camera-GPX-Check-File-Transfer\app\src\main\AndroidManifest.xml:26:25-66
+36
+37                <category android:name="android.intent.category.LAUNCHER" />
+37-->C:\Users\Panigalski\Documents\GitHub\Main-Camera-GPX-Check-File-Transfer\app\src\main\AndroidManifest.xml:27:17-77
+37-->C:\Users\Panigalski\Documents\GitHub\Main-Camera-GPX-Check-File-Transfer\app\src\main\AndroidManifest.xml:27:27-74
+38            </intent-filter>
+39        </activity>
+40
+41        <service
+41-->C:\Users\Panigalski\Documents\GitHub\Main-Camera-GPX-Check-File-Transfer\app\src\main\AndroidManifest.xml:31:9-34:40
+42            android:name="com.labpano.gpxextractor.monitor.RecordingMonitorService"
+42-->C:\Users\Panigalski\Documents\GitHub\Main-Camera-GPX-Check-File-Transfer\app\src\main\AndroidManifest.xml:32:13-60
+43            android:enabled="true"
+43-->C:\Users\Panigalski\Documents\GitHub\Main-Camera-GPX-Check-File-Transfer\app\src\main\AndroidManifest.xml:33:13-35
+44            android:exported="false" />
+44-->C:\Users\Panigalski\Documents\GitHub\Main-Camera-GPX-Check-File-Transfer\app\src\main\AndroidManifest.xml:34:13-37
+45        <service
+45-->C:\Users\Panigalski\Documents\GitHub\Main-Camera-GPX-Check-File-Transfer\app\src\main\AndroidManifest.xml:36:9-39:40
+46            android:name="com.labpano.gpxextractor.wifi.WifiFileServerService"
+46-->C:\Users\Panigalski\Documents\GitHub\Main-Camera-GPX-Check-File-Transfer\app\src\main\AndroidManifest.xml:37:13-55
+47            android:enabled="true"
+47-->C:\Users\Panigalski\Documents\GitHub\Main-Camera-GPX-Check-File-Transfer\app\src\main\AndroidManifest.xml:38:13-35
+48            android:exported="false" />
+48-->C:\Users\Panigalski\Documents\GitHub\Main-Camera-GPX-Check-File-Transfer\app\src\main\AndroidManifest.xml:39:13-37
+49
+50        <receiver
+50-->C:\Users\Panigalski\Documents\GitHub\Main-Camera-GPX-Check-File-Transfer\app\src\main\AndroidManifest.xml:41:9-49:20
+51            android:name="com.labpano.gpxextractor.monitor.BootReceiver"
+51-->C:\Users\Panigalski\Documents\GitHub\Main-Camera-GPX-Check-File-Transfer\app\src\main\AndroidManifest.xml:42:13-49
+52            android:enabled="true"
+52-->C:\Users\Panigalski\Documents\GitHub\Main-Camera-GPX-Check-File-Transfer\app\src\main\AndroidManifest.xml:43:13-35
+53            android:exported="true" >
+53-->C:\Users\Panigalski\Documents\GitHub\Main-Camera-GPX-Check-File-Transfer\app\src\main\AndroidManifest.xml:44:13-36
+54            <intent-filter>
+54-->C:\Users\Panigalski\Documents\GitHub\Main-Camera-GPX-Check-File-Transfer\app\src\main\AndroidManifest.xml:45:13-48:29
+55                <action android:name="android.intent.action.BOOT_COMPLETED" />
+55-->C:\Users\Panigalski\Documents\GitHub\Main-Camera-GPX-Check-File-Transfer\app\src\main\AndroidManifest.xml:46:17-79
+55-->C:\Users\Panigalski\Documents\GitHub\Main-Camera-GPX-Check-File-Transfer\app\src\main\AndroidManifest.xml:46:25-76
+56                <action android:name="android.intent.action.MY_PACKAGE_REPLACED" />
+56-->C:\Users\Panigalski\Documents\GitHub\Main-Camera-GPX-Check-File-Transfer\app\src\main\AndroidManifest.xml:47:17-84
+56-->C:\Users\Panigalski\Documents\GitHub\Main-Camera-GPX-Check-File-Transfer\app\src\main\AndroidManifest.xml:47:25-81
+57            </intent-filter>
+58        </receiver>
+59    </application>
+60
+61</manifest>

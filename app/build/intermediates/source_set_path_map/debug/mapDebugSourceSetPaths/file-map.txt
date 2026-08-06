@@ -1,0 +1,7 @@
+com.labpano.gpxextractor.app-pngs-0 C:\Users\Panigalski\Documents\GitHub\Main-Camera-GPX-Check-File-Transfer\app\build\generated\res\pngs\debug
+com.labpano.gpxextractor.app-resValues-1 C:\Users\Panigalski\Documents\GitHub\Main-Camera-GPX-Check-File-Transfer\app\build\generated\res\resValues\debug
+com.labpano.gpxextractor.app-packageDebugResources-2 C:\Users\Panigalski\Documents\GitHub\Main-Camera-GPX-Check-File-Transfer\app\build\intermediates\incremental\debug\packageDebugResources\merged.dir
+com.labpano.gpxextractor.app-packageDebugResources-3 C:\Users\Panigalski\Documents\GitHub\Main-Camera-GPX-Check-File-Transfer\app\build\intermediates\incremental\debug\packageDebugResources\stripped.dir
+com.labpano.gpxextractor.app-debug-4 C:\Users\Panigalski\Documents\GitHub\Main-Camera-GPX-Check-File-Transfer\app\build\intermediates\merged_res\debug\mergeDebugResources
+com.labpano.gpxextractor.app-debug-5 C:\Users\Panigalski\Documents\GitHub\Main-Camera-GPX-Check-File-Transfer\app\src\debug\res
+com.labpano.gpxextractor.app-main-6 C:\Users\Panigalski\Documents\GitHub\Main-Camera-GPX-Check-File-Transfer\app\src\main\res
