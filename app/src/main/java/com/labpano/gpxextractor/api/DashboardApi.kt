@@ -32,6 +32,7 @@ object DashboardApi {
             put("failed", readReport(File(directory, "FAILED.TXT")))
             put("good", readReport(File(directory, "GOOD.TXT")))
             put("transfers", TransferProgressRegistry.toJson())
+            put("storageWriteAlerts", StorageWriteAlertRegistry.toJson(context))
         }.toString()
     }
 
