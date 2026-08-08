@@ -60,3 +60,10 @@ The APK is created under `app/build/outputs/apk/debug/`.
 - `actions/upload-artifact@v7` (Node.js 24)
 - Java remains Temurin 17 for the Android/Gradle build.
 - GitHub-hosted runners satisfy the required Actions runner version.
+## 0.5.9
+
+- Added persistent MP4 destination-write failure monitoring for internal and external storage.
+- Records failures while preparing the output folder, writing/finalizing MP4 files, and verifying completed MP4 copies.
+- Exposes recent failures to the Client App through the additive `storageWriteAlerts` field in dashboard API v3.
+- Write alerts are retained for seven days, bounded to 50 entries, and identical retry failures are deduplicated for five minutes.
+

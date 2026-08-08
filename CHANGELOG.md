@@ -21,3 +21,10 @@
 ## 0.5.6
 
 - Added durable transfer journaling, bounded retries, quarantine routing and persistent pending-GPX queue.
+## 0.5.9
+
+- Added persistent MP4 destination-write failure monitoring for internal and external storage.
+- Records failures while preparing the output folder, writing/finalizing MP4 files, and verifying completed MP4 copies.
+- Exposes recent failures to the Client App through the additive `storageWriteAlerts` field in dashboard API v3.
+- Write alerts are retained for seven days, bounded to 50 entries, and identical retry failures are deduplicated for five minutes.
+

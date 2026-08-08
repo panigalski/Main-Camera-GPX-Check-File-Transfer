@@ -4,8 +4,10 @@ import android.content.ContentResolver
 import android.content.Context
 import android.database.Cursor
 import android.net.Uri
+import android.os.Environment
 import android.os.SystemClock
 import android.provider.DocumentsContract
+import com.labpano.gpxextractor.api.StorageWriteAlertRegistry
 import com.labpano.gpxextractor.api.TransferProgressRegistry
 import com.labpano.gpxextractor.ui.DocumentTreePathResolver
 import com.labpano.gpxextractor.util.StorageAccessCoordinator
@@ -73,7 +75,7 @@ class OutputMover(private val context: Context) {
         directory: File,
         beforeSourceCleanup: ((Result) -> Unit)?
     ): Result {
-        ensureDirectory(directory)
+        ensureDirectoryForVideo(directory, video)
         val videoExtension = video.extension.ifBlank { "mp4" }
 
         val exactVideo = File(directory, "${video.nameWithoutExtension}.$videoExtension")
@@ -96,13 +98,13 @@ class OutputMover(private val context: Context) {
             exactGpxMatches && !exactVideo.exists() -> {
                 targetVideo = exactVideo
                 targetGpx = exactGpx
-                copyFileAtomically(video, targetVideo)
+                copyVideoFileAtomically(video, targetVideo)
             }
             else -> {
                 val base = chooseBaseName(video.nameWithoutExtension, videoExtension) { name -> File(directory, name).exists() }
                 targetVideo = File(directory, "$base.$videoExtension")
                 targetGpx = File(directory, "$base.gpx")
-                copyFileAtomically(video, targetVideo)
+                copyVideoFileAtomically(video, targetVideo)
                 try {
                     copyFileAtomically(gpx, targetGpx)
                 } catch (error: Exception) {
@@ -112,7 +114,7 @@ class OutputMover(private val context: Context) {
             }
         }
 
-        verifyLocalDestination(targetVideo, video.length(), "video")
+        verifyLocalVideoDestination(targetVideo, video.length(), video)
         verifyLocalDestination(targetGpx, gpx.length(), "GPX")
         val prepared = Result(
             videoName = targetVideo.name,
@@ -132,16 +134,16 @@ class OutputMover(private val context: Context) {
         directory: File,
         beforeSourceCleanup: ((Result) -> Unit)?
     ): Result {
-        ensureDirectory(directory)
+        ensureDirectoryForVideo(directory, video)
         val extension = video.extension.ifBlank { "mp4" }
         val exact = File(directory, "${video.nameWithoutExtension}.$extension")
         val target = if (exact.isFile && exact.length() == video.length()) {
             exact
         } else {
             val base = chooseBaseName(video.nameWithoutExtension, extension) { name -> File(directory, name).exists() }
-            File(directory, "$base.$extension").also { copyFileAtomically(video, it) }
+            File(directory, "$base.$extension").also { copyVideoFileAtomically(video, it) }
         }
-        verifyLocalDestination(target, video.length(), "video")
+        verifyLocalVideoDestination(target, video.length(), video)
         val prepared = Result(
             videoName = target.name,
             gpxName = null,
@@ -163,7 +165,7 @@ class OutputMover(private val context: Context) {
         beforeSourceCleanup: ((Result) -> Unit)?
     ): Result {
         val resolver = context.contentResolver
-        val destinationDocumentUri = destinationDocument(resolver, treeUri, subfolderName)
+        val destinationDocumentUri = destinationDocumentForVideo(resolver, treeUri, subfolderName, video)
         val videoExtension = video.extension.ifBlank { "mp4" }
         val exactVideoName = "${video.nameWithoutExtension}.$videoExtension"
         val exactGpxName = "${video.nameWithoutExtension}.gpx"
@@ -192,7 +194,7 @@ class OutputMover(private val context: Context) {
             exactGpxMatches && exactVideoUri == null -> {
                 videoName = exactVideoName
                 gpxName = exactGpxName
-                videoUri = createAndCopy(resolver, destinationDocumentUri, "video/mp4", videoName, video)
+                videoUri = createAndCopyVideo(resolver, destinationDocumentUri, treeUri, subfolderName, videoName, video)
                 gpxUri = requireNotNull(exactGpxUri)
             }
             else -> {
@@ -200,7 +202,7 @@ class OutputMover(private val context: Context) {
                 val base = chooseBaseName(video.nameWithoutExtension, videoExtension) { names.contains(it.lowercase()) }
                 videoName = "$base.$videoExtension"
                 gpxName = "$base.gpx"
-                videoUri = createAndCopy(resolver, destinationDocumentUri, "video/mp4", videoName, video)
+                videoUri = createAndCopyVideo(resolver, destinationDocumentUri, treeUri, subfolderName, videoName, video)
                 gpxUri = try {
                     createAndCopy(resolver, destinationDocumentUri, "application/gpx+xml", gpxName, gpx)
                 } catch (error: Exception) {
@@ -210,7 +212,7 @@ class OutputMover(private val context: Context) {
             }
         }
 
-        verifyDocumentCopy(resolver, videoUri, video.length(), videoName)
+        verifyDocumentVideoCopy(resolver, videoUri, video.length(), videoName, treeUri, subfolderName, video)
         verifyDocumentCopy(resolver, gpxUri, gpx.length(), gpxName)
         val destinationLabel = humanReadableTreePath(treeUri, subfolderName)
         val prepared = Result(
@@ -233,7 +235,7 @@ class OutputMover(private val context: Context) {
         beforeSourceCleanup: ((Result) -> Unit)?
     ): Result {
         val resolver = context.contentResolver
-        val destinationDocumentUri = destinationDocument(resolver, treeUri, subfolderName)
+        val destinationDocumentUri = destinationDocumentForVideo(resolver, treeUri, subfolderName, video)
         val extension = video.extension.ifBlank { "mp4" }
         val exactName = "${video.nameWithoutExtension}.$extension"
         val exactUri = findChildDocument(resolver, treeUri, destinationDocumentUri, exactName)
@@ -247,9 +249,9 @@ class OutputMover(private val context: Context) {
             val names = childNames(resolver, treeUri, destinationDocumentUri)
             val base = chooseBaseName(video.nameWithoutExtension, extension) { names.contains(it.lowercase()) }
             videoName = "$base.$extension"
-            videoUri = createAndCopy(resolver, destinationDocumentUri, "video/mp4", videoName, video)
+            videoUri = createAndCopyVideo(resolver, destinationDocumentUri, treeUri, subfolderName, videoName, video)
         }
-        verifyDocumentCopy(resolver, videoUri, video.length(), videoName)
+        verifyDocumentVideoCopy(resolver, videoUri, video.length(), videoName, treeUri, subfolderName, video)
         val destinationLabel = humanReadableTreePath(treeUri, subfolderName)
         val prepared = Result(
             videoName = videoName,
@@ -281,6 +283,171 @@ class OutputMover(private val context: Context) {
             }
         }
     }
+
+    private fun ensureDirectoryForVideo(directory: File, video: File) {
+        try {
+            ensureDirectory(directory)
+        } catch (error: Throwable) {
+            recordVideoWriteFailure(
+                storageType = storageTypeForDirectory(directory),
+                videoName = video.name,
+                destination = directory.absolutePath,
+                operation = "PREPARE_OUTPUT_FOLDER",
+                error = error
+            )
+            throw error
+        }
+    }
+
+    private fun copyVideoFileAtomically(source: File, destination: File) {
+        try {
+            copyFileAtomically(source, destination)
+        } catch (error: Throwable) {
+            recordVideoWriteFailure(
+                storageType = storageTypeForDirectory(destination.parentFile ?: destination),
+                videoName = source.name,
+                destination = destination.absolutePath,
+                operation = "WRITE_MP4",
+                error = error
+            )
+            throw error
+        }
+    }
+
+    private fun verifyLocalVideoDestination(destination: File, expectedSize: Long, source: File) {
+        try {
+            verifyLocalDestination(destination, expectedSize, "video")
+        } catch (error: Throwable) {
+            recordVideoWriteFailure(
+                storageType = storageTypeForDirectory(destination.parentFile ?: destination),
+                videoName = source.name,
+                destination = destination.absolutePath,
+                operation = "VERIFY_MP4",
+                error = error
+            )
+            throw error
+        }
+    }
+
+    private fun destinationDocumentForVideo(
+        resolver: ContentResolver,
+        treeUri: Uri,
+        subfolderName: String?,
+        video: File
+    ): Uri {
+        return try {
+            destinationDocument(resolver, treeUri, subfolderName)
+        } catch (error: Throwable) {
+            recordVideoWriteFailure(
+                storageType = storageTypeForTree(treeUri),
+                videoName = video.name,
+                destination = safeTreeLabel(treeUri, subfolderName),
+                operation = "PREPARE_OUTPUT_FOLDER",
+                error = error
+            )
+            throw error
+        }
+    }
+
+    private fun createAndCopyVideo(
+        resolver: ContentResolver,
+        parentUri: Uri,
+        treeUri: Uri,
+        subfolderName: String?,
+        displayName: String,
+        source: File
+    ): Uri {
+        return try {
+            createAndCopy(resolver, parentUri, "video/mp4", displayName, source)
+        } catch (error: Throwable) {
+            recordVideoWriteFailure(
+                storageType = storageTypeForTree(treeUri),
+                videoName = source.name,
+                destination = safeTreeLabel(treeUri, subfolderName) + "/" + displayName,
+                operation = "WRITE_MP4",
+                error = error
+            )
+            throw error
+        }
+    }
+
+    private fun verifyDocumentVideoCopy(
+        resolver: ContentResolver,
+        documentUri: Uri,
+        expectedSize: Long,
+        displayName: String,
+        treeUri: Uri,
+        subfolderName: String?,
+        source: File
+    ) {
+        try {
+            verifyDocumentCopy(resolver, documentUri, expectedSize, displayName)
+        } catch (error: Throwable) {
+            recordVideoWriteFailure(
+                storageType = storageTypeForTree(treeUri),
+                videoName = source.name,
+                destination = safeTreeLabel(treeUri, subfolderName) + "/" + displayName,
+                operation = "VERIFY_MP4",
+                error = error
+            )
+            throw error
+        }
+    }
+
+    private fun recordVideoWriteFailure(
+        storageType: String,
+        videoName: String,
+        destination: String,
+        operation: String,
+        error: Throwable
+    ) {
+        if (!isDestinationWriteFailure(error)) return
+        StorageWriteAlertRegistry.recordFailure(
+            context = context,
+            storageType = storageType,
+            videoName = videoName,
+            destination = destination,
+            operation = operation,
+            error = error
+        )
+    }
+
+    private fun isDestinationWriteFailure(error: Throwable): Boolean {
+        if (error is InterruptedException) return false
+        val message = error.message.orEmpty().lowercase()
+        if (message.contains("source changed during transfer") || message.contains("source does not exist")) return false
+        return true
+    }
+
+    private fun storageTypeForDirectory(directory: File): String {
+        if (runCatching { Environment.isExternalStorageRemovable(directory) }.getOrDefault(false)) {
+            return "EXTERNAL"
+        }
+        val path = runCatching { directory.canonicalPath }.getOrElse { directory.absolutePath }
+        val primary = runCatching { Environment.getExternalStorageDirectory().canonicalPath }
+            .getOrElse { Environment.getExternalStorageDirectory().absolutePath }
+        return when {
+            path == primary || path.startsWith(primary + File.separator) -> "INTERNAL"
+            path.startsWith("/storage/") && !path.startsWith("/storage/emulated/") -> "EXTERNAL"
+            path.startsWith("/mnt/media_rw/") -> "EXTERNAL"
+            else -> "INTERNAL"
+        }
+    }
+
+    private fun storageTypeForTree(treeUri: Uri): String {
+        val documentId = runCatching { DocumentsContract.getTreeDocumentId(treeUri) }.getOrNull().orEmpty()
+        val volumeId = documentId.substringBefore(':')
+        return when {
+            volumeId.equals("primary", ignoreCase = true) -> "INTERNAL"
+            documentId.contains("/storage/emulated/", ignoreCase = true) -> "INTERNAL"
+            volumeId.isNotBlank() -> "EXTERNAL"
+            else -> "UNKNOWN"
+        }
+    }
+
+    private fun safeTreeLabel(treeUri: Uri, subfolderName: String?): String =
+        runCatching { humanReadableTreePath(treeUri, subfolderName) }
+            .getOrElse { treeUri.toString() }
 
     private fun ensureDirectory(directory: File) {
         if (!directory.exists() && !directory.mkdirs()) throw IOException("Cannot create output folder: ${directory.absolutePath}")
