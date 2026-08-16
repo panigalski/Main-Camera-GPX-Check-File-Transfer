@@ -1,0 +1,23 @@
+# Gradle and Android Studio
+.gradle/
+.idea/
+**/build/
+local.properties
+*.iml
+captures/
+.externalNativeBuild/
+.cxx/
+
+# Signing credentials and generated packages
+keystore.properties
+release-keystore.jks
+*.jks
+*.keystore
+*.apk
+*.aab
+
+# Operating-system and editor files
+.DS_Store
+Thumbs.db
+*.swp
+*.swo
