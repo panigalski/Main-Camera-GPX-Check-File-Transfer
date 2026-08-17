@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.5.41
+- Added the restricted `POST /api/v1/backup-gpx-upload` endpoint used only by the Client's manual **Send GPX Files** action.
+- Uploaded Client backup GPX files are written under the configured Output Folder in the matching `dd-MM-yyyy/` subfolder.
+- The write surface is constrained to date folders and `*_backup.gpx` names, requires Content-Length, caps payloads at 16 MiB, validates GPX content, and verifies SHA-256/byte size after writing.
+- Supports both filesystem and persisted SAF Output Folder destinations. Same-name/same-checksum uploads are idempotent; different same-name files return a conflict instead of being overwritten.
+- Replaced the HTTP request reader with a byte-safe header parser so POST bodies cannot be consumed accidentally by buffered character reads while preserving existing GET/HEAD/DELETE endpoints.
+
 ## 0.5.40
 - Final-release audit hardening for Fragment Storage and Main/Client state ordering.
 - Removed persistent recording-family guesses; Camera property edits are short-lived mode hints only, and the shared Stitched/Street View directory is treated as ambiguous unless Camera-derived evidence resolves it.

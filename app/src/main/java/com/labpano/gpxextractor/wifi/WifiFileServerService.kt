@@ -43,9 +43,10 @@ import java.util.concurrent.TimeUnit
 import java.util.concurrent.atomic.AtomicBoolean
 
 /**
- * Small HTTP server for browsing camera storage and synchronizing dashboard/report data with
- * the companion client on the same LAN. It exposes only the configured monitoring and output
- * roots; application-private and system paths are never added to the web root.
+ * Small HTTP server for browsing camera storage, synchronizing dashboard/report data, and
+ * accepting the companion Client's tightly restricted manual backup-GPX uploads on the same LAN.
+ * It exposes only the configured monitoring/output roots; application-private and system paths are
+ * never added to the web root, and uploads can target only a date subfolder under OUTPUT.
  */
 class WifiFileServerService : Service() {
     private val running = AtomicBoolean(false)
@@ -131,10 +132,11 @@ class WifiFileServerService : Service() {
     private fun handleClient(socket: Socket) {
         socket.use { client ->
             client.soTimeout = SOCKET_TIMEOUT_MS
-            val input = client.getInputStream().bufferedReader(Charsets.ISO_8859_1)
+            val input = BufferedInputStream(client.getInputStream())
             val output = BufferedOutputStream(client.getOutputStream())
-            val requestLine = input.readLine() ?: return
-            if (requestLine.length > MAX_REQUEST_LINE_LENGTH) {
+            val requestLine = try {
+                readHttpLine(input, MAX_REQUEST_LINE_LENGTH) ?: return
+            } catch (_: IOException) {
                 sendText(output, 414, "URI Too Long", "Request line is too long")
                 return
             }
@@ -144,9 +146,9 @@ class WifiFileServerService : Service() {
                 return
             }
             val method = parts[0].uppercase(Locale.US)
-            if (method != "GET" && method != "HEAD" && method != "DELETE") {
+            if (method != "GET" && method != "HEAD" && method != "DELETE" && method != "POST") {
                 drainHeaders(input)
-                sendText(output, 405, "Method Not Allowed", "Only GET, HEAD and DELETE are supported", method == "HEAD")
+                sendText(output, 405, "Method Not Allowed", "Only GET, HEAD, DELETE and POST are supported", method == "HEAD")
                 return
             }
             val headers = try {
@@ -164,7 +166,7 @@ class WifiFileServerService : Service() {
             }
             val forceDownload = query.split('&').any { it.equals("download=1", ignoreCase = true) }
             try {
-                route(method, path, query, headers["range"], output, method == "HEAD", forceDownload)
+                route(method, path, query, headers, input, output, method == "HEAD", forceDownload)
             } catch (error: Throwable) {
                 AppLog.error("Wi-Fi request failed: $method $path", error)
                 runCatching {
@@ -187,11 +189,21 @@ class WifiFileServerService : Service() {
         method: String,
         path: String,
         query: String,
-        rangeHeader: String?,
+        headers: Map<String, String>,
+        input: BufferedInputStream,
         output: BufferedOutputStream,
         headOnly: Boolean,
         forceDownload: Boolean
     ) {
+        val rangeHeader = headers["range"]
+        if (path == "/api/v1/backup-gpx-upload") {
+            if (method != "POST") {
+                sendText(output, 405, "Method Not Allowed", "Backup GPX upload requires POST", headOnly)
+            } else {
+                receiveBackupGpxUpload(query, headers, input, output)
+            }
+            return
+        }
         if (path == "/api/v1/pending-gpx-file") {
             if (method != "GET" && method != "HEAD") {
                 sendText(output, 405, "Method Not Allowed", "Pending GPX download supports GET and HEAD only", headOnly)
@@ -254,6 +266,10 @@ class WifiFileServerService : Service() {
         }
         if (method == "DELETE") {
             sendText(output, 405, "Method Not Allowed", "DELETE is supported only for report entries", headOnly)
+            return
+        }
+        if (method == "POST") {
+            sendText(output, 405, "Method Not Allowed", "POST is supported only for backup GPX upload", headOnly)
             return
         }
         if (path == "/" || path.isBlank()) {
@@ -551,7 +567,7 @@ class WifiFileServerService : Service() {
             <h1>Labpano Camera Storage</h1>
             <div class="notice"><strong>Windows 10:</strong> connect the laptop and camera to the same router, then enter this address in Microsoft Edge, Chrome, or Firefox. Select a storage root to browse folders and download files.</div>
             <ul class="files">$items</ul>
-            <p class="muted">File browsing and downloads are restricted to the configured monitoring and output folders.</p>
+            <p class="muted">Browsing/downloads are restricted to configured monitoring/output folders. Companion Client GPX uploads are restricted to date subfolders under the configured Output Folder.</p>
             """.trimIndent()
         )
         sendHtml(output, 200, "OK", body, headOnly)
@@ -686,13 +702,26 @@ class WifiFileServerService : Service() {
         }
     }
 
-    private fun readHeaders(input: java.io.BufferedReader): Map<String, String> {
+    private fun readHttpLine(input: BufferedInputStream, maxLength: Int): String? {
+        val bytes = java.io.ByteArrayOutputStream()
+        while (true) {
+            val value = input.read()
+            if (value < 0) return if (bytes.size() == 0) null else bytes.toString(Charsets.ISO_8859_1.name())
+            if (value == '\n'.code) break
+            if (value != '\r'.code) {
+                if (bytes.size() >= maxLength) throw IOException("HTTP line is too long")
+                bytes.write(value)
+            }
+        }
+        return bytes.toString(Charsets.ISO_8859_1.name())
+    }
+
+    private fun readHeaders(input: BufferedInputStream): Map<String, String> {
         val headers = mutableMapOf<String, String>()
         var count = 0
         while (true) {
-            val line = input.readLine() ?: break
+            val line = readHttpLine(input, MAX_HEADER_LINE_LENGTH) ?: break
             if (line.isEmpty()) break
-            if (line.length > MAX_HEADER_LINE_LENGTH) throw IOException("HTTP header line is too long")
             count++
             if (count > MAX_HEADER_COUNT) throw IOException("Too many HTTP headers")
             val separator = line.indexOf(':')
@@ -703,12 +732,75 @@ class WifiFileServerService : Service() {
         return headers
     }
 
-    private fun drainHeaders(input: java.io.BufferedReader) {
+    private fun drainHeaders(input: BufferedInputStream) {
         var count = 0
         while (count++ < MAX_HEADER_COUNT) {
-            val line = input.readLine() ?: return
+            val line = runCatching { readHttpLine(input, MAX_HEADER_LINE_LENGTH) }.getOrNull() ?: return
             if (line.isEmpty()) return
-            if (line.length > MAX_HEADER_LINE_LENGTH) return
+        }
+    }
+
+    private fun receiveBackupGpxUpload(
+        query: String,
+        headers: Map<String, String>,
+        input: BufferedInputStream,
+        output: BufferedOutputStream
+    ) {
+        val parameters = parseQuery(query)
+        val subfolder = parameters["subfolder"].orEmpty()
+        val fileName = parameters["filename"].orEmpty()
+        val expectedSha256 = parameters["sha256"]
+        val contentLength = headers["content-length"]?.toLongOrNull()
+        if (contentLength == null || contentLength < 0L) {
+            sendJson(output, JSONObject().apply {
+                put("error", true)
+                put("message", "Content-Length is required")
+            }.toString(), false, 411, "Length Required")
+            return
+        }
+        if (contentLength > BackupGpxUploadStore.MAX_GPX_UPLOAD_BYTES.toLong()) {
+            sendJson(output, JSONObject().apply {
+                put("error", true)
+                put("message", "GPX upload exceeds the size limit")
+            }.toString(), false, 413, "Payload Too Large")
+            return
+        }
+        val body = ByteArray(contentLength.toInt())
+        var offset = 0
+        while (offset < body.size) {
+            val read = input.read(body, offset, body.size - offset)
+            if (read < 0) {
+                sendJson(output, JSONObject().apply {
+                    put("error", true)
+                    put("message", "GPX upload ended before Content-Length bytes were received")
+                }.toString(), false, 400, "Bad Request")
+                return
+            }
+            offset += read
+        }
+
+        try {
+            val stored = BackupGpxUploadStore(this).store(subfolder, fileName, body, expectedSha256)
+            sendJson(output, JSONObject().apply {
+                put("ok", true)
+                put("subfolder", stored.subfolder)
+                put("fileName", stored.fileName)
+                put("sizeBytes", stored.sizeBytes)
+                put("sha256", stored.sha256)
+                put("destination", stored.destination)
+                put("alreadyPresent", stored.alreadyPresent)
+            }.toString(), false)
+        } catch (error: BackupGpxUploadStore.UploadException) {
+            val reason = when (error.statusCode) {
+                400 -> "Bad Request"
+                409 -> "Conflict"
+                413 -> "Payload Too Large"
+                else -> "Internal Server Error"
+            }
+            sendJson(output, JSONObject().apply {
+                put("error", true)
+                put("message", error.message ?: "GPX upload failed")
+            }.toString(), false, error.statusCode, reason)
         }
     }
 
@@ -825,7 +917,7 @@ a{color:#075fa8;text-decoration:none;word-break:break-word}small{display:block;c
         } else @Suppress("DEPRECATION") Notification.Builder(this)
         return builder.setSmallIcon(R.drawable.ic_app)
             .setContentTitle("Labpano Wi-Fi file access")
-            .setContentText("Read-only browser available on port $listenPort")
+            .setContentText("File access and GPX upload available on port $listenPort")
             .setContentIntent(pendingIntent).setOngoing(true).build()
     }
 
