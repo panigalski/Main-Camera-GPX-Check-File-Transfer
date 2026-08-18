@@ -13,7 +13,7 @@ class DatedOutputReportWriterTest {
     @get:Rule val temporaryFolder = TemporaryFolder()
 
     @Test
-    fun createsOneReportPerStatusInsideDateStatusFolders() {
+    fun createsOnlyTheReportForTheStatusThatOccurred() {
         val output = temporaryFolder.newFolder("output")
         val layout = DatedOutputLayout("08-08-2026")
         DatedOutputReportWriter(output).append(
@@ -27,11 +27,9 @@ class DatedOutputReportWriterTest {
         val failed = File(output, "08-08-2026/FAILED/08-08-2026_FAILED.txt")
         val error = File(output, "08-08-2026/ERROR/08-08-2026_ERROR.txt")
         assertTrue(good.isFile)
-        assertTrue(failed.isFile)
-        assertTrue(error.isFile)
+        assertTrue(!failed.exists())
+        assertTrue(!error.exists())
         assertEquals(1, good.readLines().size)
-        assertEquals(0, failed.readLines().size)
-        assertEquals(0, error.readLines().size)
     }
 
     @Test

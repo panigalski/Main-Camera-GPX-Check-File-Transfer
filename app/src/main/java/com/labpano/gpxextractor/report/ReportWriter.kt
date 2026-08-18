@@ -14,12 +14,6 @@ class ReportWriter(private val reportDirectory: File) {
         if (!reportDirectory.exists() && !reportDirectory.mkdirs()) {
             throw IllegalStateException("Cannot create report directory: ${reportDirectory.absolutePath}")
         }
-        listOf(ProcessingStatus.GOOD, ProcessingStatus.FAILED, ProcessingStatus.ERROR).forEach { status ->
-            val report = File(reportDirectory, "${status.name}.TXT")
-            if (!report.exists() && !report.createNewFile()) {
-                throw IllegalStateException("Cannot create report file: ${report.absolutePath}")
-            }
-        }
     }
 
     fun append(status: ProcessingStatus, source: File, message: String) =

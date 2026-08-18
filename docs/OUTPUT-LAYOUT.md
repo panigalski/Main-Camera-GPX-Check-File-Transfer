@@ -1,25 +1,25 @@
 # Current Output Folder contract
 
-Main App 0.5.46 uses a **date-first** classified output structure while retaining cumulative reports in the OUTPUT root:
+Main App 0.5.47 uses a **date-first** classified output structure while retaining cumulative reports in the OUTPUT root:
 
 ```text
 OUTPUT/
-├── GOOD.TXT
-├── FAILED.TXT
-├── ERROR.TXT
+├── GOOD.TXT                  # only after at least one GOOD recording
+├── FAILED.TXT                # only after at least one FAILED recording
+├── ERROR.TXT                 # only after at least one ERROR recording
 └── dd-MM-yyyy/
     ├── GOOD/
-    │   ├── dd-MM-yyyy_GOOD.txt
+    │   ├── dd-MM-yyyy_GOOD.txt   # only if GOOD occurred that day
     │   ├── <video>.mp4
     │   ├── <video>.gpx
     │   └── <video>_backup.gpx
     ├── FAILED/
-    │   ├── dd-MM-yyyy_FAILED.txt
+    │   ├── dd-MM-yyyy_FAILED.txt # only if FAILED occurred that day
     │   ├── <video>.mp4
     │   ├── <video>.gpx
     │   └── <video>_backup.gpx
     └── ERROR/
-        ├── dd-MM-yyyy_ERROR.txt
+        ├── dd-MM-yyyy_ERROR.txt  # only if ERROR occurred that day
         ├── <video>.mp4
         ├── <video>.gpx             # when extraction produced a valid GPX
         └── <video>_backup.gpx      # when supplied by Client Automatic Backup
@@ -47,8 +47,8 @@ Classification is determined before GPX densification. Interpolation cannot conv
 
 ## Reports
 
-- Root `GOOD.TXT`, `FAILED.TXT`, and `ERROR.TXT` are cumulative across all recording days.
-- Each `dd-MM-yyyy/<STATUS>/` folder contains one daily report for that date/status.
+- Root reports are cumulative across all recording days, but each one is created only after the first recording of that status: no GOOD recordings means no `GOOD.TXT`, and likewise for FAILED/ERROR.
+- A daily `dd-MM-yyyy_<STATUS>.txt` report is created only after the first recording of that status on that date. Empty status reports are never pre-created.
 - Each committed recording is appended to both the matching root cumulative report and matching daily report.
 - There are **no per-recording/per-segment TXT files**.
 - Deleting a report entry through the API removes the entry from both report levels.
@@ -61,4 +61,4 @@ Client 1.10.32 sends only per-video `_backup.gpx` files. Main resolves each uplo
 
 ## Temporary PROCESSING folder cleanup
 
-`PROCESSING` is an internal state, not an Output Folder classification. Main App 0.5.46 does not create `OUTPUT/dd-MM-yyyy/PROCESSING/`. Empty legacy `PROCESSING` directories are removed automatically. A non-empty legacy directory is preserved to avoid deleting unknown user data.
+`PROCESSING` is an internal state, not an Output Folder classification. Main App 0.5.47 does not create `OUTPUT/dd-MM-yyyy/PROCESSING/`. Empty legacy `PROCESSING` directories are removed automatically. A non-empty legacy directory is preserved to avoid deleting unknown user data.

@@ -13,6 +13,16 @@ class ReportWriterTest {
     val temporaryFolder = TemporaryFolder()
 
     @Test
+    fun preflightDoesNotCreateEmptyStatusReports() {
+        val monitoring = temporaryFolder.newFolder("monitoring")
+        ReportWriter(monitoring).ensureReportFiles()
+
+        assertTrue(!File(monitoring, "GOOD.TXT").exists())
+        assertTrue(!File(monitoring, "FAILED.TXT").exists())
+        assertTrue(!File(monitoring, "ERROR.TXT").exists())
+    }
+
+    @Test
     fun cumulativeReportPreservesExistingRecordsWhenNewRecordIsAppended() {
         val monitoring = temporaryFolder.newFolder("monitoring")
         val report = File(monitoring, "GOOD.TXT")

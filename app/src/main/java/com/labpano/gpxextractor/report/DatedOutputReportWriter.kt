@@ -26,8 +26,7 @@ class DatedOutputReportWriter(private val reportDirectory: File) {
         transactionId: String?,
         layout: DatedOutputLayout
     ) = synchronized(ReportFileAccess.lock) {
-        ensureDailyReportFiles(layout)
-        val report = reportFile(layout, status)
+        val report = ensureDailyReportFile(layout, status)
         val marker = transactionId?.let { "transactionId=$it" }
         if (marker != null && report.isFile && containsMarker(report, marker)) return@synchronized
 
@@ -40,17 +39,16 @@ class DatedOutputReportWriter(private val reportDirectory: File) {
         }
     }
 
-    private fun ensureDailyReportFiles(layout: DatedOutputLayout) {
-        listOf(ProcessingStatus.GOOD, ProcessingStatus.FAILED, ProcessingStatus.ERROR).forEach { status ->
-            val folder = File(File(reportDirectory, layout.date), status.name)
-            if (!folder.exists() && !folder.mkdirs()) {
-                throw IOException("Cannot create daily report folder: ${folder.absolutePath}")
-            }
-            val report = reportFile(layout, status)
-            if (!report.exists() && !report.createNewFile()) {
-                throw IOException("Cannot create daily report file: ${report.absolutePath}")
-            }
+    private fun ensureDailyReportFile(layout: DatedOutputLayout, status: ProcessingStatus): File {
+        val folder = File(File(reportDirectory, layout.date), status.name)
+        if (!folder.exists() && !folder.mkdirs()) {
+            throw IOException("Cannot create daily report folder: ${folder.absolutePath}")
         }
+        val report = reportFile(layout, status)
+        if (!report.exists() && !report.createNewFile()) {
+            throw IOException("Cannot create daily report file: ${report.absolutePath}")
+        }
+        return report
     }
 
     private fun reportFile(layout: DatedOutputLayout, status: ProcessingStatus): File =

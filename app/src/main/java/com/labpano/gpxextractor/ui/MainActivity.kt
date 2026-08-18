@@ -218,7 +218,7 @@ class MainActivity : Activity() {
                 setPadding(gap, gap, gap, gap)
             })
             addView(TextView(this@MainActivity).apply {
-                text = "Completed recordings are classified into OUTPUT/dd-mm-yyyy/GOOD/, FAILED/ or ERROR/. OUTPUT also keeps cumulative GOOD.TXT, FAILED.TXT and ERROR.TXT reports, while each status folder contains its own dd-mm-yyyy_<STATUS>.txt daily report. Temporary PROCESSING folders are removed when empty."
+                text = "Completed recordings are classified into OUTPUT/dd-mm-yyyy/GOOD/, FAILED/ or ERROR/. OUTPUT keeps cumulative GOOD.TXT, FAILED.TXT and ERROR.TXT reports only for statuses that have occurred, while each status folder contains a dd-mm-yyyy_<STATUS>.txt daily report only when that status occurred that day. Temporary PROCESSING folders are removed when empty."
                 textSize = 11f
                 setPadding(gap, gap, gap, gap)
             })

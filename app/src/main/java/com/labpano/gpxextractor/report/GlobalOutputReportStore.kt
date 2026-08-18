@@ -28,7 +28,8 @@ import java.util.Locale
  *     ERROR/dd-MM-yyyy_ERROR.txt
  *
  * Every committed recording is appended to the matching root cumulative report and the matching
- * daily report. There are no per-video TXT reports.
+ * daily report. Report files are lazy: a GOOD/FAILED/ERROR report exists only after at least one
+ * recording of that status has been committed. There are no per-video TXT reports.
  */
 class GlobalOutputReportStore(private val context: Context) {
     data class Destination(val directory: File?, val treeUri: Uri?)
@@ -65,10 +66,9 @@ class GlobalOutputReportStore(private val context: Context) {
     }
 
     /**
-     * Verifies the selected OUTPUT root and ensures GOOD.TXT / FAILED.TXT / ERROR.TXT exist.
-     * When upgrading from 0.5.45, any newly-created root report is backfilled from the existing
-     * daily reports so the cumulative history is preserved. Daily reports are still kept in their
-     * date/status folders.
+     * Verifies/migrates the selected OUTPUT root without creating empty report files.
+     * Root and daily reports are created lazily by appendOnce() for the first recording of each
+     * status. Empty placeholder reports left by 0.5.46 are removed when there is no matching MP4.
      */
     fun ensureReportFiles(destination: Destination = currentDestination()) = synchronized(ReportFileAccess.lock) {
         try {
@@ -78,17 +78,17 @@ class GlobalOutputReportStore(private val context: Context) {
             when {
                 destination.directory != null -> {
                     ensureLocalDirectory(destination.directory)
-                    val created = ensureLocalRootReports(destination.directory)
                     migrateLegacyLocalStatusFolderReports(destination.directory)
-                    created.forEach { status -> backfillLocalRootFromDaily(destination.directory, status) }
+                    statuses.forEach { status -> backfillLocalRootFromDaily(destination.directory, status) }
                     if (needsDualLayoutMigration) reconcileLocalDailyFromRoot(destination.directory)
+                    cleanupEmptyLocalPlaceholderReports(destination.directory)
                 }
                 destination.treeUri != null -> {
                     verifyTreeRoot(destination.treeUri)
-                    val created = ensureTreeRootReports(destination.treeUri)
                     migrateLegacyTreeStatusFolderReports(destination.treeUri)
-                    created.forEach { status -> backfillTreeRootFromDaily(destination.treeUri, status) }
+                    statuses.forEach { status -> backfillTreeRootFromDaily(destination.treeUri, status) }
                     if (needsDualLayoutMigration) reconcileTreeDailyFromRoot(destination.treeUri)
+                    cleanupEmptyTreePlaceholderReports(destination.treeUri)
                 }
                 else -> throw IOException("Output report destination is not configured")
             }
@@ -102,6 +102,7 @@ class GlobalOutputReportStore(private val context: Context) {
         }
     }
 
+    /** Compatibility preflight. It validates the date/destination but intentionally creates no reports. */
     fun ensureDailyReportFiles(
         outputDate: String,
         destination: Destination = currentDestination()
@@ -109,13 +110,13 @@ class GlobalOutputReportStore(private val context: Context) {
         requireValidDate(outputDate)
         try {
             when {
-                destination.directory != null -> ensureLocalDailyReports(destination.directory, outputDate)
-                destination.treeUri != null -> ensureTreeDailyReports(destination.treeUri, outputDate)
+                destination.directory != null -> ensureLocalDirectory(destination.directory)
+                destination.treeUri != null -> verifyTreeRoot(destination.treeUri)
                 else -> throw IOException("Output report destination is not configured")
             }
-            ReportHealthRegistry.success(context, "ensure-daily-reports-$outputDate")
+            ReportHealthRegistry.success(context, "validate-daily-report-destination-$outputDate")
         } catch (error: Throwable) {
-            ReportHealthRegistry.failure(context, "ensure-daily-reports-$outputDate", error)
+            ReportHealthRegistry.failure(context, "validate-daily-report-destination-$outputDate", error)
             throw error
         }
     }
@@ -204,10 +205,8 @@ class GlobalOutputReportStore(private val context: Context) {
     }
 
     private fun appendLocal(root: File, date: String, status: ProcessingStatus, line: String, marker: String?) {
-        ensureLocalRootReports(root)
-        ensureLocalDailyReports(root, date)
-        val dailyReport = localReportFile(root, date, status)
-        val rootReport = localRootReportFile(root, status)
+        val dailyReport = ensureLocalDailyReport(root, date, status)
+        val rootReport = ensureLocalRootReport(root, status)
         if (marker == null || !containsMarkerLocal(dailyReport, marker)) appendLocalLine(dailyReport, line)
         if (marker == null || !containsMarkerLocal(rootReport, marker)) appendLocalLine(rootReport, line)
     }
@@ -220,13 +219,9 @@ class GlobalOutputReportStore(private val context: Context) {
     }
 
     private fun appendTree(treeUri: Uri, date: String, status: ProcessingStatus, line: String, marker: String?) {
-        ensureTreeRootReports(treeUri)
-        ensureTreeDailyReports(treeUri, date)
         val resolver = context.contentResolver
-        val dailyReport = findTreeDailyReport(resolver, treeUri, date, status)
-            ?: throw IOException("Cannot find ${reportName(date, status)} after creation")
-        val rootReport = findTreeRootReport(resolver, treeUri, status)
-            ?: throw IOException("Cannot find ${rootReportName(status)} after creation")
+        val dailyReport = ensureTreeDailyReport(treeUri, date, status)
+        val rootReport = ensureTreeRootReport(treeUri, status)
         if (marker == null || !containsMarkerTree(resolver, dailyReport, marker)) appendTreeLine(resolver, dailyReport, line)
         if (marker == null || !containsMarkerTree(resolver, rootReport, marker)) appendTreeLine(resolver, rootReport, line)
     }
@@ -381,35 +376,25 @@ class GlobalOutputReportStore(private val context: Context) {
         }
     }
 
-    private fun ensureLocalRootReports(root: File): Set<ProcessingStatus> {
+    private fun ensureLocalRootReport(root: File, status: ProcessingStatus): File {
         ensureLocalDirectory(root)
-        val created = linkedSetOf<ProcessingStatus>()
-        statuses.forEach { status ->
-            val report = localRootReportFile(root, status)
-            if (!report.exists()) {
-                if (!report.createNewFile()) throw IOException("Cannot create root report file: ${report.absolutePath}")
-                created += status
-            }
-            if (!report.isFile || !report.canRead() || !report.canWrite()) {
-                throw IOException("Root report is not readable/writable: ${report.absolutePath}")
-            }
+        val report = localRootReportFile(root, status)
+        if (!report.exists() && !report.createNewFile()) {
+            throw IOException("Cannot create root report file: ${report.absolutePath}")
         }
-        return created
+        if (!report.isFile || !report.canRead() || !report.canWrite()) {
+            throw IOException("Root report is not readable/writable: ${report.absolutePath}")
+        }
+        return report
     }
 
-    private fun ensureTreeRootReports(treeUri: Uri): Set<ProcessingStatus> {
+    private fun ensureTreeRootReport(treeUri: Uri, status: ProcessingStatus): Uri {
         val resolver = context.contentResolver
         val root = rootTreeDocument(treeUri)
-        val created = linkedSetOf<ProcessingStatus>()
-        statuses.forEach { status ->
-            val name = rootReportName(status)
-            if (findTreeChild(resolver, treeUri, root, name) == null) {
-                DocumentsContract.createDocument(resolver, root, "text/plain", name)
-                    ?: throw IOException("Cannot create $name")
-                created += status
-            }
-        }
-        return created
+        val name = rootReportName(status)
+        return findTreeChild(resolver, treeUri, root, name)
+            ?: DocumentsContract.createDocument(resolver, root, "text/plain", name)
+            ?: throw IOException("Cannot create $name")
     }
 
     private fun reconcileLocalDailyFromRoot(root: File) {
@@ -419,8 +404,7 @@ class GlobalOutputReportStore(private val context: Context) {
             rootReport.useLines(Charsets.UTF_8) { lines ->
                 lines.filter { it.isNotBlank() }.forEach { line ->
                     val date = dateForLegacyLine(line)
-                    ensureLocalDailyReports(root, date)
-                    val dailyReport = localReportFile(root, date, status)
+                    val dailyReport = ensureLocalDailyReport(root, date, status)
                     if (!containsExactLineLocal(dailyReport, line)) appendLocalLine(dailyReport, line + "\n")
                 }
             }
@@ -436,9 +420,7 @@ class GlobalOutputReportStore(private val context: Context) {
             } ?: emptyList()
             lines.forEach { line ->
                 val date = dateForLegacyLine(line)
-                ensureTreeDailyReports(treeUri, date)
-                val dailyReport = findTreeDailyReport(resolver, treeUri, date, status)
-                    ?: throw IOException("Cannot locate daily report while reconciling ${rootReportName(status)}")
+                val dailyReport = ensureTreeDailyReport(treeUri, date, status)
                 if (!containsExactLineTree(resolver, dailyReport, line)) appendTreeLine(resolver, dailyReport, line + "\n")
             }
         }
@@ -466,18 +448,20 @@ class GlobalOutputReportStore(private val context: Context) {
 
     private fun backfillTreeRootFromDaily(treeUri: Uri, status: ProcessingStatus) {
         val resolver = context.contentResolver
-        val rootReport = findTreeRootReport(resolver, treeUri, status)
-            ?: throw IOException("Cannot locate ${rootReportName(status)} for backfill")
-        val existing = resolver.openInputStream(rootReport)?.bufferedReader(Charsets.UTF_8)?.use { reader ->
-            reader.lineSequence().filter { it.isNotBlank() }.toHashSet()
-        } ?: hashSetOf()
+        val dailyLines = linkedSetOf<String>()
         listTreeDateDirectories(resolver, treeUri).forEach { dateEntry ->
             val dailyReport = findTreeDailyReport(resolver, treeUri, dateEntry.name, status) ?: return@forEach
             resolver.openInputStream(dailyReport)?.bufferedReader(Charsets.UTF_8)?.useLines { lines ->
-                lines.filter { it.isNotBlank() }.forEach { line ->
-                    if (existing.add(line)) appendTreeLine(resolver, rootReport, line + "\n")
-                }
+                lines.filter { it.isNotBlank() }.forEach(dailyLines::add)
             }
+        }
+        if (dailyLines.isEmpty()) return
+        val rootReport = ensureTreeRootReport(treeUri, status)
+        val existing = resolver.openInputStream(rootReport)?.bufferedReader(Charsets.UTF_8)?.use { reader ->
+            reader.lineSequence().filter { it.isNotBlank() }.toHashSet()
+        } ?: hashSetOf()
+        dailyLines.forEach { line ->
+            if (existing.add(line)) appendTreeLine(resolver, rootReport, line + "\n")
         }
     }
 
@@ -486,30 +470,26 @@ class GlobalOutputReportStore(private val context: Context) {
     private fun findTreeRootReport(resolver: ContentResolver, treeUri: Uri, status: ProcessingStatus): Uri? =
         findTreeChild(resolver, treeUri, rootTreeDocument(treeUri), rootReportName(status))
 
-    private fun ensureLocalDailyReports(root: File, date: String) {
+    private fun ensureLocalDailyReport(root: File, date: String, status: ProcessingStatus): File {
         ensureLocalDirectory(root)
-        statuses.forEach { status ->
-            val folder = File(File(root, date), status.name)
-            if (!folder.exists() && !folder.mkdirs()) throw IOException("Cannot create report folder: ${folder.absolutePath}")
-            if (!folder.isDirectory) throw IOException("Report path is not a directory: ${folder.absolutePath}")
-            val report = File(folder, reportName(date, status))
-            if (!report.exists() && !report.createNewFile()) throw IOException("Cannot create report file: ${report.absolutePath}")
-            if (!report.isFile || !report.canRead() || !report.canWrite()) throw IOException("Report is not readable/writable: ${report.absolutePath}")
-        }
+        val folder = File(File(root, date), status.name)
+        if (!folder.exists() && !folder.mkdirs()) throw IOException("Cannot create report folder: ${folder.absolutePath}")
+        if (!folder.isDirectory) throw IOException("Report path is not a directory: ${folder.absolutePath}")
+        val report = File(folder, reportName(date, status))
+        if (!report.exists() && !report.createNewFile()) throw IOException("Cannot create report file: ${report.absolutePath}")
+        if (!report.isFile || !report.canRead() || !report.canWrite()) throw IOException("Report is not readable/writable: ${report.absolutePath}")
+        return report
     }
 
-    private fun ensureTreeDailyReports(treeUri: Uri, date: String) {
+    private fun ensureTreeDailyReport(treeUri: Uri, date: String, status: ProcessingStatus): Uri {
         val resolver = context.contentResolver
         val root = rootTreeDocument(treeUri)
         val dateDir = ensureTreeDirectory(resolver, treeUri, root, date)
-        statuses.forEach { status ->
-            val statusDir = ensureTreeDirectory(resolver, treeUri, dateDir, status.name)
-            val name = reportName(date, status)
-            if (findTreeChild(resolver, treeUri, statusDir, name) == null) {
-                DocumentsContract.createDocument(resolver, statusDir, "text/plain", name)
-                    ?: throw IOException("Cannot create $name")
-            }
-        }
+        val statusDir = ensureTreeDirectory(resolver, treeUri, dateDir, status.name)
+        val name = reportName(date, status)
+        return findTreeChild(resolver, treeUri, statusDir, name)
+            ?: DocumentsContract.createDocument(resolver, statusDir, "text/plain", name)
+            ?: throw IOException("Cannot create $name")
     }
 
     private fun localReportFile(root: File, date: String, status: ProcessingStatus): File =
@@ -537,10 +517,9 @@ class GlobalOutputReportStore(private val context: Context) {
 
     private fun migrateLegacyLocalLine(root: File, status: ProcessingStatus, line: String) {
         val date = dateForLegacyLine(line)
-        ensureLocalDailyReports(root, date)
-        val dailyReport = localReportFile(root, date, status)
+        val dailyReport = ensureLocalDailyReport(root, date, status)
         if (!containsExactLineLocal(dailyReport, line)) appendLocalLine(dailyReport, line + "\n")
-        val rootReport = localRootReportFile(root, status)
+        val rootReport = ensureLocalRootReport(root, status)
         if (!containsExactLineLocal(rootReport, line)) appendLocalLine(rootReport, line + "\n")
     }
 
@@ -559,18 +538,72 @@ class GlobalOutputReportStore(private val context: Context) {
                 } ?: emptyList()
                 lines.forEach { line ->
                     val date = dateForLegacyLine(line)
-                    ensureTreeDailyReports(treeUri, date)
-                    val dailyReport = findTreeDailyReport(resolver, treeUri, date, status)
-                        ?: throw IOException("Cannot locate migrated daily report")
+                    val dailyReport = ensureTreeDailyReport(treeUri, date, status)
                     if (!containsExactLineTree(resolver, dailyReport, line)) appendTreeLine(resolver, dailyReport, line + "\n")
-                    val rootReport = findTreeRootReport(resolver, treeUri, status)
-                        ?: throw IOException("Cannot locate root cumulative report")
+                    val rootReport = ensureTreeRootReport(treeUri, status)
                     if (!containsExactLineTree(resolver, rootReport, line)) appendTreeLine(resolver, rootReport, line + "\n")
                 }
                 if (!DocumentsContract.deleteDocument(resolver, legacy)) throw IOException("Cannot remove migrated legacy report")
             }
         }
     }
+
+    private fun cleanupEmptyLocalPlaceholderReports(root: File) {
+        statuses.forEach { status ->
+            localDateDirectories(root).forEach { dateDir ->
+                val statusDir = File(dateDir, status.name)
+                val report = File(statusDir, reportName(dateDir.name, status))
+                val hasMp4 = statusDir.listFiles()?.any { it.isFile && it.extension.equals("mp4", ignoreCase = true) } == true
+                if (report.isFile && report.length() == 0L && !hasMp4) report.delete()
+            }
+            val rootReport = localRootReportFile(root, status)
+            val hasAnyMp4 = localDateDirectories(root).any { dateDir ->
+                File(dateDir, status.name).listFiles()?.any { it.isFile && it.extension.equals("mp4", ignoreCase = true) } == true
+            }
+            val hasDailyContent = localDateDirectories(root).any { dateDir ->
+                localReportFile(root, dateDir.name, status).takeIf { it.isFile }?.length()?.let { it > 0L } == true
+            }
+            if (rootReport.isFile && rootReport.length() == 0L && !hasAnyMp4 && !hasDailyContent) rootReport.delete()
+        }
+    }
+
+    private fun cleanupEmptyTreePlaceholderReports(treeUri: Uri) {
+        val resolver = context.contentResolver
+        val dateEntries = listTreeDateDirectories(resolver, treeUri)
+        statuses.forEach { status ->
+            dateEntries.forEach dateLoop@ { dateEntry ->
+                val dateRoot = dateEntry.uri
+                val statusDir = findTreeChild(resolver, treeUri, dateRoot, status.name) ?: return@dateLoop
+                if (!isTreeDirectory(resolver, statusDir)) return@dateLoop
+                val children = listTreeChildren(resolver, treeUri, statusDir)
+                val reportName = reportName(dateEntry.name, status)
+                val report = children.firstOrNull { it.name.equals(reportName, ignoreCase = true) && it.mimeType != DocumentsContract.Document.MIME_TYPE_DIR }
+                val hasMp4 = children.any { it.mimeType != DocumentsContract.Document.MIME_TYPE_DIR && it.name.endsWith(".mp4", ignoreCase = true) }
+                if (report != null && !treeReportHasNonBlankLine(resolver, report.uri) && !hasMp4) {
+                    runCatching { DocumentsContract.deleteDocument(resolver, report.uri) }
+                }
+            }
+            val rootReport = findTreeRootReport(resolver, treeUri, status)
+            if (rootReport != null && !treeReportHasNonBlankLine(resolver, rootReport)) {
+                val hasAnyMp4 = dateEntries.any { dateEntry ->
+                    val statusDir = findTreeChild(resolver, treeUri, dateEntry.uri, status.name) ?: return@any false
+                    listTreeChildren(resolver, treeUri, statusDir).any {
+                        it.mimeType != DocumentsContract.Document.MIME_TYPE_DIR && it.name.endsWith(".mp4", ignoreCase = true)
+                    }
+                }
+                val hasDailyContent = dateEntries.any { dateEntry ->
+                    findTreeDailyReport(resolver, treeUri, dateEntry.name, status)?.let(::documentSize)?.let { it > 0L } == true
+                }
+                if (!hasAnyMp4 && !hasDailyContent) runCatching { DocumentsContract.deleteDocument(resolver, rootReport) }
+            }
+        }
+    }
+
+
+    private fun treeReportHasNonBlankLine(resolver: ContentResolver, report: Uri): Boolean =
+        resolver.openInputStream(report)?.bufferedReader(Charsets.UTF_8)?.useLines { lines ->
+            lines.any { it.isNotBlank() }
+        } ?: false
 
     private fun dateForLegacyLine(line: String): String {
         val parts = line.split('\t', limit = 3)

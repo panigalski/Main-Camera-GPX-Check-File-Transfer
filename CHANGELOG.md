@@ -1,3 +1,10 @@
+## 0.5.47
+
+- Create GOOD/FAILED/ERROR report files lazily: no global or daily report exists until at least one recording of that status is committed.
+- Remove empty placeholder report files left by 0.5.46 when there is no corresponding classified MP4.
+- Preserve dual reporting: matching recordings still append to both the cumulative root report and the dated status report.
+- Keep per-video TXT reports disabled and empty PROCESSING-folder cleanup unchanged.
+
 # Changelog
 
 ## 0.5.46
