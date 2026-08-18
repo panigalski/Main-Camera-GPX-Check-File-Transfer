@@ -74,23 +74,75 @@ class CammParser {
 
             if (points.isEmpty()) throw Mp4Exception("CAMM GPS points were invalid after timestamp synchronization")
 
+            val videoStart = synchronized.canonicalStartMillis
             val videoEnd = anchor.durationUs.takeIf { it > 0L }
-                ?.let { anchor.startMillis + it / 1000L }
+                ?.let { videoStart + it / 1000L }
             val gpxStart = points.first().timestampMillis
             val gpxEnd = points.last().timestampMillis
-            val overlap = videoEnd?.let { calculateOverlapMillis(anchor.startMillis, it, gpxStart, gpxEnd) }
+            val overlap = videoEnd?.let { calculateOverlapMillis(videoStart, it, gpxStart, gpxEnd) }
 
             return CammParseResult(
                 points = points,
                 timing = GpsTimingDiagnostics(
-                    anchorSource = anchor.source,
-                    videoStartMillis = anchor.startMillis,
+                    anchorSource = synchronized.timelineStrategy,
+                    videoStartMillis = videoStart,
                     videoEndMillis = videoEnd,
                     gpxStartMillis = gpxStart,
                     gpxEndMillis = gpxEnd,
                     appliedTimestampShiftMillis = synchronized.appliedShiftMillis,
-                    overlapMillis = overlap
+                    overlapMillis = overlap,
+                    timelineStrategy = synchronized.timelineStrategy,
+                    rawGpsClockDiscontinuityCount = synchronized.rawGpsClockDiscontinuityCount,
+                    decodedGpsSampleCount = synchronized.decodedGpsSampleCount,
+                    canonicalGpsSampleCount = synchronized.canonicalGpsSampleCount
                 )
+            )
+        }
+    }
+
+    /**
+     * Reads only the MP4 movie/video timing needed by the phone-backup queue. This deliberately
+     * does not require a valid CAMM/GPS track, so even an ERROR recording can still receive a
+     * truthful smartphone backup for its complete movie interval.
+     */
+    fun inspectVideoTimeline(file: File): VideoTimeline {
+        require(file.isFile) { "MP4 does not exist: ${file.absolutePath}" }
+        IsoBmffReader(file).use { reader ->
+            val topLevel = reader.readBoxes().toList()
+            val moov = topLevel.singleOrNull { it.type == "moov" }
+                ?: throw Mp4Exception("MP4 has no unique moov box")
+            if (topLevel.none { it.type == "mdat" }) throw Mp4Exception("MP4 has no mdat box")
+            val children = reader.children(moov).toList()
+            val movieHeader = children.firstOrNull { it.type == "mvhd" }?.let { parseMovieHeader(reader, it) }
+            val videoTrack = children.filter { it.type == "trak" }
+                .mapNotNull { parseVideoTrackHeader(reader, it) }
+                .maxByOrNull { it.durationUs }
+            val durationUs = movieHeader?.durationUs?.takeIf { it in 1L..MAX_VIDEO_DURATION_US }
+                ?: videoTrack?.durationUs?.takeIf { it in 1L..MAX_VIDEO_DURATION_US }
+                ?: throw Mp4Exception("MP4 video duration is unavailable")
+
+            val filename = parseTimestampFromFilename(file.nameWithoutExtension)
+            val videoHeader = videoTrack?.creationTimeUnixMillis?.takeIf(::isPlausibleCaptureTime)
+            val movieCreation = movieHeader?.creationTimeUnixMillis?.takeIf(::isPlausibleCaptureTime)
+            val header = videoHeader ?: movieCreation
+            val start = when {
+                filename != null && header != null && abs(filename - header) > START_CANDIDATE_AGREEMENT_MS -> filename
+                header != null -> header
+                filename != null -> filename
+                else -> (file.lastModified() - durationUs / 1000L).takeIf(::isPlausibleCaptureTime)
+                    ?: throw Mp4Exception("MP4 capture start time is unavailable")
+            }
+            val source = when {
+                start == filename && header != null -> "recording filename (header disagreement)"
+                start == videoHeader -> "MP4 video track header (mdhd)"
+                start == movieCreation -> "MP4 movie header (mvhd)"
+                start == filename -> "recording filename"
+                else -> "file modification time minus duration"
+            }
+            return VideoTimeline(
+                startMillis = start,
+                endMillis = safeAdd(start, durationUs / 1000L, "MP4 video end"),
+                source = source
             )
         }
     }
@@ -104,19 +156,30 @@ class CammParser {
     private data class DecodedGps(
         val point: GpsPoint,
         val packetType: Int,
-        val presentationTimeUs: Long
+        val presentationTimeUs: Long,
+        /** Absolute GPS-clock timestamp carried by CAMM type 6, before timeline normalization. */
+        val rawAbsoluteTimestampMillis: Long? = null
     )
 
     private data class SyncResult(
         val points: List<GpsPoint>,
-        val appliedShiftMillis: Long
+        val canonicalStartMillis: Long,
+        val appliedShiftMillis: Long,
+        val timelineStrategy: String,
+        val rawGpsClockDiscontinuityCount: Int,
+        val decodedGpsSampleCount: Int,
+        val canonicalGpsSampleCount: Int
     )
 
     private data class VideoAnchor(
         val startMillis: Long,
         val durationUs: Long,
         val source: String,
-        val authoritative: Boolean
+        val authoritative: Boolean,
+        val filenameStartMillis: Long? = null,
+        val videoHeaderStartMillis: Long? = null,
+        val movieHeaderStartMillis: Long? = null,
+        val cammHeaderStartMillis: Long? = null
     )
 
     private data class MovieHeader(
@@ -154,7 +217,12 @@ class CammParser {
             6 -> decodeFullGps(buffer)
             else -> null
         } ?: return null
-        return DecodedGps(point, type, presentationTimeUs)
+        return DecodedGps(
+            point = point,
+            packetType = type,
+            presentationTimeUs = presentationTimeUs,
+            rawAbsoluteTimestampMillis = point.timestampMillis.takeIf { type == 6 }
+        )
     }
 
     private fun decodeGpsSample(
@@ -358,70 +426,181 @@ class CammParser {
             ?: 0L
 
         val videoCreation = videoTrack?.creationTimeUnixMillis?.takeIf(::isPlausibleCaptureTime)
-        if (videoCreation != null) {
-            return VideoAnchor(videoCreation, durationUs, "MP4 video track header (mdhd)", true)
-        }
         val movieCreation = movieHeader?.creationTimeUnixMillis?.takeIf(::isPlausibleCaptureTime)
-        if (movieCreation != null) {
-            return VideoAnchor(movieCreation, durationUs, "MP4 movie header (mvhd)", true)
-        }
         val filenameTime = parseTimestampFromFilename(file.nameWithoutExtension)
-        if (filenameTime != null) {
-            return VideoAnchor(filenameTime, durationUs, "recording filename", false)
-        }
         val cammCreation = cammTrack.creationTimeUnixMillis?.takeIf(::isPlausibleCaptureTime)
-        if (cammCreation != null) {
-            return VideoAnchor(cammCreation, durationUs, "CAMM track header (mdhd)", false)
-        }
         val modifiedFallback = (file.lastModified() - durationUs / 1000L).takeIf(::isPlausibleCaptureTime)
             ?: file.lastModified()
-        return VideoAnchor(modifiedFallback, durationUs, "file modification time minus duration", false)
+
+        // This is only the provisional base needed while decoding type-5 packets. The final
+        // canonical start is chosen after all type-6 GPS clocks can be compared with the media PTS.
+        val provisionalStart = videoCreation ?: movieCreation ?: filenameTime ?: cammCreation ?: modifiedFallback
+        val provisionalSource = when (provisionalStart) {
+            videoCreation -> "MP4 video track header (mdhd)"
+            movieCreation -> "MP4 movie header (mvhd)"
+            filenameTime -> "recording filename"
+            cammCreation -> "CAMM track header (mdhd)"
+            else -> "file modification time minus duration"
+        }
+
+        return VideoAnchor(
+            startMillis = provisionalStart,
+            durationUs = durationUs,
+            source = provisionalSource,
+            authoritative = videoCreation != null || movieCreation != null,
+            filenameStartMillis = filenameTime,
+            videoHeaderStartMillis = videoCreation,
+            movieHeaderStartMillis = movieCreation,
+            cammHeaderStartMillis = cammCreation
+        )
     }
 
+    /**
+     * CAMM type 6 carries an absolute GPS clock, but the camera also places every packet on the
+     * CAMM media timeline. The media PTS is the authoritative *relative* position in the video.
+     *
+     * Older code used every type-6 absolute clock directly. A mid-recording GPS-clock jump could
+     * therefore create a false multi-second GPX hole even though the CAMM samples themselves were
+     * continuous. It also allowed type-5 and type-6 clocks to produce near-duplicate points.
+     *
+     * The repaired strategy chooses one robust absolute movie start and timestamps every sample as
+     * `canonicalStart + presentationTime`. Type-6 GPS time is used only as an absolute-start
+     * candidate/diagnostic, never as the per-sample pacing clock.
+     */
     private fun synchronizeToVideoTimeline(
         samples: List<DecodedGps>,
         anchor: VideoAnchor
     ): SyncResult {
-        var adjusted = samples
-        var totalShift = 0L
-
-        // CAMM type 6 carries an absolute GPS-clock timestamp. Some camera firmware writes
-        // MP4 capture time and GPS time on different clock bases (or leaves the 18-second GPS/UTC
-        // offset unresolved). Street View compares against the MP4 timeline, so normalize a stable
-        // constant offset while preserving every interval between genuine samples.
-        val fullGps = adjusted.filter { it.packetType == 6 }
-        if (anchor.authoritative && fullGps.size >= 2) {
-            val corrections = fullGps.map {
-                (anchor.startMillis + it.presentationTimeUs / 1000L) - it.point.timestampMillis
-            }.sorted()
-            val correction = median(corrections)
-            val deviations = corrections.map { abs(it - correction) }.sorted()
-            val medianDeviation = median(deviations)
-            if (abs(correction) >= MIN_CLOCK_CORRECTION_MS && medianDeviation <= MAX_CLOCK_JITTER_MS) {
-                adjusted = adjusted.map { sample ->
-                    if (sample.packetType == 6) sample.copy(point = shiftPoint(sample.point, correction)) else sample
-                }
-                totalShift += correction
+        val ordered = samples.sortedBy { it.presentationTimeUs }
+        val gpsStarts = ordered.mapNotNull { sample ->
+            sample.rawAbsoluteTimestampMillis?.let { raw ->
+                safeAdd(raw, -(sample.presentationTimeUs / 1000L), "type-6 derived movie start")
             }
-        }
+        }.sorted()
+        val gpsStart = robustMedianStart(gpsStarts)
+        val canonical = chooseCanonicalStart(anchor, gpsStart)
 
-        val videoEnd = anchor.durationUs.takeIf { it > 0L }
-            ?.let { anchor.startMillis + it / 1000L }
-        if (videoEnd != null) {
-            val first = adjusted.minOf { it.point.timestampMillis }
-            val last = adjusted.maxOf { it.point.timestampMillis }
-            if (calculateOverlapMillis(anchor.startMillis, videoEnd, first, last) <= 0L) {
-                val corrections = adjusted.map {
-                    (anchor.startMillis + it.presentationTimeUs / 1000L) - it.point.timestampMillis
-                }.sorted()
-                val correction = median(corrections)
-                adjusted = adjusted.map { it.copy(point = shiftPoint(it.point, correction)) }
-                totalShift += correction
-            }
+        val mapped = ordered.map { sample ->
+            val canonicalTimestamp = safeAdd(
+                canonical.startMillis,
+                sample.presentationTimeUs / 1000L,
+                "canonical CAMM timestamp"
+            )
+            sample.copy(point = sample.point.copy(timestampMillis = canonicalTimestamp))
         }
+        val collapsed = collapseNearDuplicateSamples(mapped)
 
-        return SyncResult(adjusted.map { it.point }, totalShift)
+        val type6Corrections = ordered.mapNotNull { sample ->
+            val raw = sample.rawAbsoluteTimestampMillis ?: return@mapNotNull null
+            val canonicalTimestamp = safeAdd(
+                canonical.startMillis,
+                sample.presentationTimeUs / 1000L,
+                "GPS clock diagnostic timestamp"
+            )
+            canonicalTimestamp - raw
+        }.sorted()
+        val clockDiscontinuities = type6Corrections.count { abs(it) > RAW_GPS_CLOCK_DISCONTINUITY_MS }
+        val representativeClockCorrection = type6Corrections.takeIf { it.isNotEmpty() }?.let(::median) ?: 0L
+
+        return SyncResult(
+            points = collapsed.map { it.point },
+            canonicalStartMillis = canonical.startMillis,
+            appliedShiftMillis = representativeClockCorrection,
+            timelineStrategy = canonical.source,
+            rawGpsClockDiscontinuityCount = clockDiscontinuities,
+            decodedGpsSampleCount = ordered.size,
+            canonicalGpsSampleCount = collapsed.size
+        )
     }
+
+    private data class CanonicalStart(val startMillis: Long, val source: String)
+
+    private fun chooseCanonicalStart(anchor: VideoAnchor, gpsDerivedStartMillis: Long?): CanonicalStart {
+        val filename = anchor.filenameStartMillis
+        val videoHeader = anchor.videoHeaderStartMillis
+        val movieHeader = anchor.movieHeaderStartMillis
+        val header = videoHeader ?: movieHeader
+
+        // Labpano filenames carry millisecond capture time. Use a type-6 consensus to detect the
+        // occasional firmware case where an MP4 mdhd/mvhd creation field represents a later
+        // finalization moment rather than the actual beginning of the video.
+        if (filename != null && gpsDerivedStartMillis != null) {
+            val gpsToFilename = abs(gpsDerivedStartMillis - filename)
+            val gpsToHeader = header?.let { abs(gpsDerivedStartMillis - it) }
+            if (gpsToFilename <= START_CANDIDATE_AGREEMENT_MS &&
+                (gpsToHeader == null || gpsToFilename + START_CANDIDATE_TIE_MARGIN_MS < gpsToHeader)
+            ) {
+                return CanonicalStart(filename, "recording filename + CAMM GPS consensus")
+            }
+            if (header != null && gpsToHeader != null && gpsToHeader <= START_CANDIDATE_AGREEMENT_MS) {
+                return CanonicalStart(
+                    header,
+                    if (videoHeader != null) "MP4 video header + CAMM GPS consensus"
+                    else "MP4 movie header + CAMM GPS consensus"
+                )
+            }
+        }
+
+        // If filename and header materially disagree and GPS cannot break the tie, prefer the
+        // camera's timestamped recording filename. This is specific to the Labpano naming scheme
+        // and avoids anchoring a full clip to a delayed/finalization creation timestamp.
+        if (filename != null && header != null && abs(filename - header) > START_CANDIDATE_AGREEMENT_MS) {
+            return CanonicalStart(filename, "recording filename (header disagreement)")
+        }
+
+        if (header != null) {
+            return CanonicalStart(
+                header,
+                if (videoHeader != null) "MP4 video track header (mdhd)" else "MP4 movie header (mvhd)"
+            )
+        }
+        if (filename != null) return CanonicalStart(filename, "recording filename")
+        if (gpsDerivedStartMillis != null && isPlausibleCaptureTime(gpsDerivedStartMillis)) {
+            return CanonicalStart(gpsDerivedStartMillis, "CAMM type-6 GPS/PTS consensus")
+        }
+        anchor.cammHeaderStartMillis?.let { return CanonicalStart(it, "CAMM track header (mdhd)") }
+        return CanonicalStart(anchor.startMillis, anchor.source)
+    }
+
+    private fun robustMedianStart(values: List<Long>): Long? {
+        if (values.size < 2) return values.singleOrNull()?.takeIf(::isPlausibleCaptureTime)
+        val medianValue = median(values)
+        val deviations = values.map { abs(it - medianValue) }.sorted()
+        val mad = median(deviations)
+        val inlierThreshold = max(TYPE6_START_MIN_INLIER_MS, mad * TYPE6_START_MAD_MULTIPLIER)
+        val inliers = values.filter { abs(it - medianValue) <= inlierThreshold }.sorted()
+        if (inliers.size < 2 || inliers.size * 2 < values.size) return null
+        return median(inliers).takeIf(::isPlausibleCaptureTime)
+    }
+
+    private fun collapseNearDuplicateSamples(samples: List<DecodedGps>): List<DecodedGps> {
+        if (samples.size < 2) return samples
+        val result = ArrayList<DecodedGps>(samples.size)
+        samples.forEach { sample ->
+            val previous = result.lastOrNull()
+            if (previous != null &&
+                abs(sample.presentationTimeUs - previous.presentationTimeUs) <= DUPLICATE_PRESENTATION_WINDOW_US &&
+                samePosition(sample.point, previous.point)
+            ) {
+                // Prefer the richer type-6 sample when the camera emits both representations for
+                // the same fix. This removes 1-2 ms duplicate GPX points without deleting motion.
+                if (sample.packetType == 6 && previous.packetType != 6) {
+                    result[result.lastIndex] = sample
+                }
+            } else {
+                result += sample
+            }
+        }
+        return result
+    }
+
+    private fun samePosition(first: GpsPoint, second: GpsPoint): Boolean =
+        abs(first.latitude - second.latitude) <= DUPLICATE_COORDINATE_EPSILON &&
+            abs(first.longitude - second.longitude) <= DUPLICATE_COORDINATE_EPSILON &&
+            when {
+                first.altitudeMeters == null || second.altitudeMeters == null -> true
+                else -> abs(first.altitudeMeters - second.altitudeMeters) <= DUPLICATE_ALTITUDE_EPSILON_METERS
+            }
 
     private fun shiftPoint(point: GpsPoint, shiftMillis: Long): GpsPoint =
         point.copy(timestampMillis = safeAdd(point.timestampMillis, shiftMillis, "GPS timestamp shift"))
@@ -768,8 +947,14 @@ class CammParser {
         private const val MAX_CAMM_SAMPLE_SIZE = 1024 * 1024
         private const val MAC_TO_UNIX_EPOCH_SECONDS = 2_082_844_800L
         private const val GPS_EPOCH_UNIX_MILLIS = 315_964_800_000L
-        private const val MIN_CLOCK_CORRECTION_MS = 1_500L
-        private const val MAX_CLOCK_JITTER_MS = 2_000L
+        private const val RAW_GPS_CLOCK_DISCONTINUITY_MS = 2_000L
+        private const val START_CANDIDATE_AGREEMENT_MS = 5_000L
+        private const val START_CANDIDATE_TIE_MARGIN_MS = 500L
+        private const val TYPE6_START_MIN_INLIER_MS = 1_500L
+        private const val TYPE6_START_MAD_MULTIPLIER = 6L
+        private const val DUPLICATE_PRESENTATION_WINDOW_US = 5_000L
+        private const val DUPLICATE_COORDINATE_EPSILON = 1e-9
+        private const val DUPLICATE_ALTITUDE_EPSILON_METERS = 0.05
         private const val MAX_VIDEO_DURATION_US = 24L * 60L * 60L * 1_000_000L
         private const val MIN_CAPTURE_TIME_MILLIS = 631_152_000_000L // 1990-01-01 UTC
         private const val MAX_CAPTURE_TIME_MILLIS = 4_102_444_800_000L // 2100-01-01 UTC

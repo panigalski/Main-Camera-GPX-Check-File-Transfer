@@ -300,6 +300,8 @@ class WifiFileServerService : Service() {
             ?.coerceIn(1, AppConfig.MAX_PENDING_API_PAGE_SIZE)
             ?: AppConfig.MAX_PENDING_API_PAGE_SIZE
         val offset = parameters["offset"]?.toIntOrNull()?.coerceAtLeast(0) ?: 0
+        val includeMediaOnly = parameters["includeMediaOnly"] == "1" ||
+            parameters["includeMediaOnly"].equals("true", ignoreCase = true)
         val items = JSONArray()
         val store = ProcessedRecordingStore(this)
         val total: Long
@@ -316,11 +318,14 @@ class WifiFileServerService : Service() {
                     migrationPrefs.edit().putBoolean(KEY_LEGACY_PENDING_IMPORT_DONE, true).apply()
                 }
             }
-            total = store.pendingGpxCount()
-            val page = store.listPendingGpx(limit, offset)
+            total = store.pendingGpxCount(includeMediaOnly)
+            val page = store.listPendingGpx(limit, offset, includeMediaOnly)
             pageSize = page.size
             page.forEach { entry ->
-                val readableSize = pendingGpxReadableSize(entry) ?: return@forEach
+                val readableSize = pendingGpxReadableSize(entry)
+                val hasVideoInterval = entry.videoStartMillis != null && entry.videoEndMillis != null &&
+                    entry.videoStartMillis > 0L && entry.videoEndMillis > entry.videoStartMillis
+                if (readableSize == null && (!includeMediaOnly || !hasVideoInterval)) return@forEach
                 items.put(JSONObject().apply {
                     put("id", entry.id)
                     put("status", entry.status)
@@ -329,8 +334,15 @@ class WifiFileServerService : Service() {
                     put("videoPath", entry.videoPath)
                     put("gpxName", entry.gpxName)
                     put("gpxPath", entry.gpxPath)
-                    put("gpxSizeBytes", readableSize)
-                    put("downloadUrl", "/api/v1/pending-gpx-file?id=${urlEncode(entry.id)}")
+                    put("gpxSizeBytes", readableSize ?: 0L)
+                    if (entry.videoStartMillis != null) put("videoStartMillis", entry.videoStartMillis)
+                    else put("videoStartMillis", JSONObject.NULL)
+                    if (entry.videoEndMillis != null) put("videoEndMillis", entry.videoEndMillis)
+                    else put("videoEndMillis", JSONObject.NULL)
+                    put(
+                        "downloadUrl",
+                        if (readableSize != null) "/api/v1/pending-gpx-file?id=${urlEncode(entry.id)}" else ""
+                    )
                 })
             }
         } finally {
@@ -338,6 +350,7 @@ class WifiFileServerService : Service() {
         }
         return JSONObject().apply {
             put("apiVersion", 3)
+            put("includeMediaOnly", includeMediaOnly)
             put("generatedAt", System.currentTimeMillis())
             put("offset", offset)
             put("limit", limit)
@@ -459,8 +472,10 @@ class WifiFileServerService : Service() {
             ?.takeIf { it.isNotBlank() && !it.startsWith("content://") }
             ?: AppConfig.defaultOutputDirectory.absolutePath
         listOf("GOOD" to "GOOD.TXT", "FAILED" to "FAILED.TXT").forEach reports@ { (status, reportName) ->
-            val report = File(outputPath, reportName)
-            if (!report.isFile || !report.canRead()) return@reports
+            // 0.5.43+ stores cumulative reports at OUTPUT/<STATUS>.TXT. Also accept the
+            // 0.5.42 OUTPUT/<STATUS>/<STATUS>.TXT location for one-time migration.
+            val report = listOf(File(outputPath, reportName), File(File(outputPath, status), reportName))
+                .firstOrNull { it.isFile && it.canRead() } ?: return@reports
             report.useLines(Charsets.UTF_8) { lines ->
                 lines.filter { it.isNotBlank() }.forEach entries@ { line ->
                     val parts = line.split('\t', limit = 3)
@@ -567,7 +582,7 @@ class WifiFileServerService : Service() {
             <h1>Labpano Camera Storage</h1>
             <div class="notice"><strong>Windows 10:</strong> connect the laptop and camera to the same router, then enter this address in Microsoft Edge, Chrome, or Firefox. Select a storage root to browse folders and download files.</div>
             <ul class="files">$items</ul>
-            <p class="muted">Browsing/downloads are restricted to configured monitoring/output folders. Companion Client GPX uploads are restricted to date subfolders under the configured Output Folder.</p>
+            <p class="muted">Browsing/downloads are restricted to configured monitoring/output folders. Companion Client GPX uploads are restricted to OUTPUT/dd-mm-yyyy/GOOD|FAILED|ERROR folders.</p>
             """.trimIndent()
         )
         sendHtml(output, 200, "OK", body, headOnly)
@@ -747,6 +762,7 @@ class WifiFileServerService : Service() {
         output: BufferedOutputStream
     ) {
         val parameters = parseQuery(query)
+        val status = parameters["status"].orEmpty()
         val subfolder = parameters["subfolder"].orEmpty()
         val fileName = parameters["filename"].orEmpty()
         val expectedSha256 = parameters["sha256"]
@@ -780,9 +796,10 @@ class WifiFileServerService : Service() {
         }
 
         try {
-            val stored = BackupGpxUploadStore(this).store(subfolder, fileName, body, expectedSha256)
+            val stored = BackupGpxUploadStore(this).store(status, subfolder, fileName, body, expectedSha256)
             sendJson(output, JSONObject().apply {
                 put("ok", true)
+                put("status", stored.status)
                 put("subfolder", stored.subfolder)
                 put("fileName", stored.fileName)
                 put("sizeBytes", stored.sizeBytes)

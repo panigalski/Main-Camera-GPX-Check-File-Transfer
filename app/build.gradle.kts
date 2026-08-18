@@ -15,8 +15,8 @@ android {
         applicationId = "com.labpano.gpxextractor"
         minSdk = 24
         targetSdk = 28
-        versionCode = 64
-        versionName = "0.5.41"
+        versionCode = 66
+        versionName = "0.5.43"
 
         testInstrumentationRunner = "android.test.InstrumentationTestRunner"
     }

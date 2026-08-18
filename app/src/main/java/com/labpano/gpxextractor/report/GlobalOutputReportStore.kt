@@ -18,13 +18,13 @@ import java.util.Locale
 import java.util.TimeZone
 
 /**
- * Owns the three cumulative reports at the selected OUTPUT root.
+ * Owns the three cumulative reports at the root of OUTPUT.
  *
  * OUTPUT/
  *   GOOD.TXT
  *   FAILED.TXT
  *   ERROR.TXT
- *   dd-mm-yyyy/   (media/GPX only; no per-day TXT files)
+ *   dd-mm-yyyy/GOOD|FAILED|ERROR/...
  *
  * Supports both ordinary filesystem output and a persisted Storage Access Framework tree.
  */
@@ -103,7 +103,7 @@ class GlobalOutputReportStore(private val context: Context) {
                 val lines = when {
                     destination.treeUri != null -> readTailTree(destination.treeUri, status, maxLines)
                     destination.directory != null -> {
-                        val file = File(destination.directory, reportName(status))
+                        val file = localReportFile(destination.directory, status)
                         if (!file.isFile || !file.canRead()) emptyList()
                         else ReportTailReader.lastNonBlankLines(file, maxLines)
                     }
@@ -162,8 +162,8 @@ class GlobalOutputReportStore(private val context: Context) {
         line: String,
         marker: String?
     ) {
-        ensureLocalDirectory(directory)
-        val report = File(directory, reportName(status))
+        val reportDirectory = ensureLocalStatusDirectory(directory, status)
+        val report = File(reportDirectory, reportName(status))
         if (!report.exists() && !report.createNewFile()) {
             throw IOException("Cannot create report file: ${report.absolutePath}")
         }
@@ -203,7 +203,7 @@ class GlobalOutputReportStore(private val context: Context) {
     private fun readTailTree(treeUri: Uri, status: ProcessingStatus, maxLines: Int): List<String> {
         if (maxLines <= 0) return emptyList()
         val resolver = context.contentResolver
-        val report = findTreeReport(resolver, treeUri, reportName(status)) ?: return emptyList()
+        val report = findTreeReport(resolver, treeUri, status) ?: return emptyList()
         readRecentTreeText(resolver, report, TREE_TAIL_SCAN_BYTES)?.let { text ->
             return text.lineSequence().filter { it.isNotBlank() }.toList().takeLast(maxLines)
         }
@@ -222,7 +222,7 @@ class GlobalOutputReportStore(private val context: Context) {
     }
 
     private fun deleteLocalLine(directory: File, status: ProcessingStatus, expectedLine: String): DeleteResult {
-        val report = File(directory, reportName(status))
+        val report = localReportFile(directory, status)
         if (!report.exists()) return DeleteResult(false, 404, "${report.name} does not exist")
         if (!report.isFile || !report.canRead() || !report.canWrite()) {
             return DeleteResult(false, 403, "${report.name} is not writable")
@@ -261,7 +261,7 @@ class GlobalOutputReportStore(private val context: Context) {
 
     private fun deleteTreeLine(treeUri: Uri, status: ProcessingStatus, expectedLine: String): DeleteResult {
         val resolver = context.contentResolver
-        val report = findTreeReport(resolver, treeUri, reportName(status))
+        val report = findTreeReport(resolver, treeUri, status)
             ?: return DeleteResult(false, 404, "${reportName(status)} does not exist")
         val backup = File(context.cacheDir, "report-backup-${System.nanoTime()}.txt")
         val rewritten = File(context.cacheDir, "report-rewrite-${System.nanoTime()}.txt")
@@ -309,10 +309,17 @@ class GlobalOutputReportStore(private val context: Context) {
         when {
             destination.treeUri != null -> ensureTreeReport(context.contentResolver, destination.treeUri, status)
             destination.directory != null -> {
-                ensureLocalDirectory(destination.directory)
-                val report = File(destination.directory, reportName(status))
-                if (!report.exists() && !report.createNewFile()) {
-                    throw IOException("Cannot create report file: ${report.absolutePath}")
+                val reportDirectory = ensureLocalStatusDirectory(destination.directory, status)
+                val report = File(reportDirectory, reportName(status))
+                if (!report.exists()) {
+                    val legacy = File(File(destination.directory, status.name), reportName(status))
+                    if (legacy.isFile && legacy.canRead()) {
+                        legacy.inputStream().use { input ->
+                            FileOutputStream(report).use { output -> input.copyTo(output); output.fd.sync() }
+                        }
+                    } else if (!report.createNewFile()) {
+                        throw IOException("Cannot create report file: ${report.absolutePath}")
+                    }
                 }
                 if (!report.isFile) throw IOException("Report path is not a file: ${report.absolutePath}")
                 if (!report.canRead()) throw IOException("Report file is not readable: ${report.absolutePath}")
@@ -330,19 +337,48 @@ class GlobalOutputReportStore(private val context: Context) {
     }
 
     private fun ensureTreeReport(resolver: ContentResolver, treeUri: Uri, status: ProcessingStatus): Uri {
+        findTreeReport(resolver, treeUri, status)?.let { return it }
+        val rootDocument = rootTreeDocument(treeUri)
         val name = reportName(status)
-        findTreeReport(resolver, treeUri, name)?.let { return it }
-        val rootDocument = DocumentsContract.buildDocumentUriUsingTree(
-            treeUri,
-            DocumentsContract.getTreeDocumentId(treeUri)
-        )
-        return DocumentsContract.createDocument(resolver, rootDocument, "text/plain", name)
+        val created = DocumentsContract.createDocument(resolver, rootDocument, "text/plain", name)
             ?: throw IOException("Cannot create $name in selected OUTPUT folder")
+        val legacy = findLegacyTreeReport(resolver, treeUri, status)
+        if (legacy != null) {
+            resolver.openInputStream(legacy)?.use { input ->
+                resolver.openOutputStream(created, "wt")?.use { output ->
+                    input.copyTo(output)
+                    output.flush()
+                } ?: throw IOException("Cannot migrate $name to OUTPUT root")
+            }
+        }
+        return created
     }
 
-    private fun findTreeReport(resolver: ContentResolver, treeUri: Uri, name: String): Uri? {
-        val rootId = runCatching { DocumentsContract.getTreeDocumentId(treeUri) }.getOrNull() ?: return null
-        val children = DocumentsContract.buildChildDocumentsUriUsingTree(treeUri, rootId)
+    private fun findLegacyTreeReport(resolver: ContentResolver, treeUri: Uri, status: ProcessingStatus): Uri? {
+        val rootDocument = rootTreeDocument(treeUri)
+        val statusDirectory = findTreeChild(resolver, treeUri, rootDocument, status.name) ?: return null
+        if (!isTreeDirectory(resolver, statusDirectory)) return null
+        return findTreeChild(resolver, treeUri, statusDirectory, reportName(status))
+    }
+
+    private fun findTreeReport(resolver: ContentResolver, treeUri: Uri, status: ProcessingStatus): Uri? {
+        val rootDocument = rootTreeDocument(treeUri)
+        return findTreeChild(resolver, treeUri, rootDocument, reportName(status))
+    }
+
+    private fun rootTreeDocument(treeUri: Uri): Uri = DocumentsContract.buildDocumentUriUsingTree(
+        treeUri,
+        DocumentsContract.getTreeDocumentId(treeUri)
+    )
+
+    private fun findTreeChild(
+        resolver: ContentResolver,
+        treeUri: Uri,
+        parent: Uri,
+        name: String
+    ): Uri? {
+        val parentId = runCatching { DocumentsContract.getDocumentId(parent) }.getOrNull() ?: return null
+        val children = DocumentsContract.buildChildDocumentsUriUsingTree(treeUri, parentId)
         var cursor: Cursor? = null
         try {
             cursor = resolver.query(
@@ -369,6 +405,33 @@ class GlobalOutputReportStore(private val context: Context) {
         }
         return null
     }
+
+    private fun isTreeDirectory(resolver: ContentResolver, uri: Uri): Boolean {
+        var cursor: Cursor? = null
+        return try {
+            cursor = resolver.query(
+                uri,
+                arrayOf(DocumentsContract.Document.COLUMN_MIME_TYPE),
+                null,
+                null,
+                null
+            )
+            val column = cursor?.getColumnIndex(DocumentsContract.Document.COLUMN_MIME_TYPE) ?: -1
+            cursor != null && cursor.moveToFirst() && column >= 0 &&
+                cursor.getString(column) == DocumentsContract.Document.MIME_TYPE_DIR
+        } finally {
+            cursor?.close()
+        }
+    }
+
+    /** Root-level cumulative report files: OUTPUT/GOOD.TXT, OUTPUT/FAILED.TXT, OUTPUT/ERROR.TXT. */
+    private fun ensureLocalStatusDirectory(root: File, status: ProcessingStatus): File {
+        ensureLocalDirectory(root)
+        return root
+    }
+
+    private fun localReportFile(root: File, status: ProcessingStatus): File =
+        File(root, reportName(status))
 
     private fun containsMarkerLocal(report: File, marker: String): Boolean {
         if (!report.isFile || report.length() == 0L) return false
@@ -407,7 +470,7 @@ class GlobalOutputReportStore(private val context: Context) {
 
     private fun localHealth(directory: File, diagnostic: ReportHealthRegistry.Snapshot): HealthSnapshot {
         val files = statuses.map { status ->
-            val file = File(directory, reportName(status))
+            val file = localReportFile(directory, status)
             ReportFileState(
                 name = file.name,
                 exists = file.isFile,
@@ -437,7 +500,7 @@ class GlobalOutputReportStore(private val context: Context) {
         val canWrite = permission?.isWritePermission == true
         val files = statuses.map { status ->
             val name = reportName(status)
-            val uri = findTreeReport(context.contentResolver, treeUri, name)
+            val uri = findTreeReport(context.contentResolver, treeUri, status)
             ReportFileState(
                 name = name,
                 exists = uri != null,

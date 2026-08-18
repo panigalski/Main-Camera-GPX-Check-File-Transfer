@@ -32,7 +32,21 @@ data class GpsTimingDiagnostics(
     val gpxStartMillis: Long,
     val gpxEndMillis: Long,
     val appliedTimestampShiftMillis: Long,
-    val overlapMillis: Long?
+    val overlapMillis: Long?,
+    /** Canonical timestamp strategy used for every decoded CAMM sample. */
+    val timelineStrategy: String = "legacy",
+    /** Type-6 packet clocks that disagreed materially with their MP4 presentation time. */
+    val rawGpsClockDiscontinuityCount: Int = 0,
+    /** Valid decoded CAMM GPS packets before near-duplicate collapse. */
+    val decodedGpsSampleCount: Int = 0,
+    /** Genuine CAMM GPS samples after near-duplicate collapse and before GPX densification. */
+    val canonicalGpsSampleCount: Int = 0
+)
+
+data class VideoTimeline(
+    val startMillis: Long,
+    val endMillis: Long,
+    val source: String
 )
 
 data class CammParseResult(

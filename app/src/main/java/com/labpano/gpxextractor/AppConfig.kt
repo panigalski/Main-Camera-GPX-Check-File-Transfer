@@ -6,8 +6,8 @@ object AppConfig {
     const val NOTIFICATION_CHANNEL_ID = "recording_monitor"
     const val NOTIFICATION_ID = 1001
     const val DATABASE_NAME = "processed_recordings.db"
-    const val DATABASE_VERSION = 7
-    const val PROCESSOR_VERSION = 11
+    const val DATABASE_VERSION = 8
+    const val PROCESSOR_VERSION = 12
     const val DEFAULT_GAP_THRESHOLD_SECONDS = 5L
 
     const val MAX_PROCESSING_ATTEMPTS = 7

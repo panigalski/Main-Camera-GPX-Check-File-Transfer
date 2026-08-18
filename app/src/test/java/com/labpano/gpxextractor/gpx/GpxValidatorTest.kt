@@ -16,4 +16,18 @@ class GpxValidatorTest {
         assertTrue(result.valid)
         assertEquals(1, result.gapCount)
     }
+    @Test
+    fun fiveSecondsPassesButFiveSecondsAndOneMillisecondFailsGapCheck() {
+        val exactlyFive = GpxValidator().validate(listOf(
+            GpsPoint(0L, 52.0, 21.0, 100.0),
+            GpsPoint(5_000L, 52.1, 21.1, 101.0)
+        ))
+        val overFive = GpxValidator().validate(listOf(
+            GpsPoint(0L, 52.0, 21.0, 100.0),
+            GpsPoint(5_001L, 52.1, 21.1, 101.0)
+        ))
+        assertEquals(0, exactlyFive.gapCount)
+        assertEquals(1, overFive.gapCount)
+    }
+
 }

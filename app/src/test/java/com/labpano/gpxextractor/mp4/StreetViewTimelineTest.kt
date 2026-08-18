@@ -47,6 +47,34 @@ class StreetViewTimelineTest {
         file.delete()
     }
 
+
+    @Test
+    fun ignoresMidRecordingType6ClockJumpWhenPresentationTimelineIsContinuous() {
+        val movieStart = Instant.parse("2026-08-17T14:19:44Z").toEpochMilli()
+        val file = buildMp4(
+            movieStartMillis = movieStart,
+            movieDurationMillis = 10_000L,
+            sampleDeltaMillis = 1_000L,
+            samples = listOf(
+                type6(movieStart, 52.0),
+                type6(movieStart + 1_000L, 52.1),
+                // Raw GPS clock jumps forward 15 seconds, while the CAMM PTS advances only 1 second.
+                type6(movieStart + 17_000L, 52.2),
+                type6(movieStart + 18_000L, 52.3)
+            )
+        )
+
+        val result = CammParser().parseDetailed(file)
+
+        assertEquals(
+            listOf(movieStart, movieStart + 1_000L, movieStart + 2_000L, movieStart + 3_000L),
+            result.points.map { it.timestampMillis }
+        )
+        assertTrue(result.timing.rawGpsClockDiscontinuityCount >= 2)
+        assertTrue(result.points.zipWithNext().all { (a, b) -> b.timestampMillis - a.timestampMillis <= 1_000L })
+        file.delete()
+    }
+
     private fun buildMp4(
         movieStartMillis: Long,
         movieDurationMillis: Long,

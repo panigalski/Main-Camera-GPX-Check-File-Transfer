@@ -1,15 +1,33 @@
-> **Build profile:** 0.5.36 keeps the lean/stable Android toolchain and moves completed recording fragments using an explicit MP4 A→B→C sequence observed in the selected Recording folder. Fragment Storage settings are not used to decide transfer eligibility.
+> **Build profile:** 0.5.43 keeps the 0.5.42 CAMM timeline repair and uses the final date-first classified OUTPUT layout with root cumulative reports and per-recording status reports.
 
 # Labpano GPX Extractor
 
 Offline Android application for the Labpano Pilot One. It monitors completed MP4 recordings, extracts CAMM GPS metadata, validates the track, writes GPX 1.1, organizes output files and provides the local API used by the companion Client App.
 
-**Current version:** 0.5.36  
+**Current version:** 0.5.43  
 
 OUTPUT folder changes are now committed immediately and exposed to the companion client on the next dashboard poll; Monitoring does not need to be restarted.
 **Minimum Android:** 7.0 (API 24)  
 **Target SDK:** 28  
 **Compile SDK:** 28
+
+
+
+## 0.5.43 final date-first OUTPUT layout
+
+- Root cumulative reports are `OUTPUT/GOOD.TXT`, `OUTPUT/FAILED.TXT`, and `OUTPUT/ERROR.TXT`.
+- Recording files are stored under `OUTPUT/dd-MM-yyyy/GOOD|FAILED|ERROR/`. All three status folders are created for a processed recording date.
+- Each recording gets a status report beside it: `<MP4-base>_ GOOD.txt`, `<MP4-base>_ FAILED.txt`, or `<MP4-base>_ ERROR.txt`.
+- Client manual `_backup.gpx` uploads target the same `OUTPUT/dd-MM-yyyy/<STATUS>/` folder.
+- Existing 0.5.42 cumulative reports under `OUTPUT/<STATUS>/<STATUS>.TXT` are accepted/migrated to the root report location when needed.
+
+## 0.5.42 GPX timeline and classified OUTPUT repair
+
+- CAMM media presentation time is now authoritative for the relative GPS timeline. Type-6 absolute GPS time is used to establish/diagnose the absolute start only, so a mid-recording GPS-clock jump cannot manufacture a false GPX gap while the MP4 CAMM timeline is continuous.
+- The exact 5-second policy is preserved: a largest consecutive real-CAMM gap of 5.000 s still passes; 5.001 s or more is FAILED. Interpolation is never used to hide a gap larger than 5 seconds.
+- OUTPUT is classified as `GOOD/dd-MM-yyyy/`, `FAILED/dd-MM-yyyy/`, and `ERROR/dd-MM-yyyy/`. Each status folder owns its cumulative `GOOD.TXT`, `FAILED.TXT`, or `ERROR.TXT`.
+- Pending-media API rows now include the full MP4 start/end interval, including ERROR media when the movie interval can be read, so Client 1.10.30 can build phone backups independently of Camera GPX timing defects.
+- Manual Client backup uploads are constrained to the matching `OUTPUT/<STATUS>/dd-MM-yyyy/` folder.
 
 
 ## 0.5.36 Recording-folder MP4 sequence transfer
@@ -55,12 +73,12 @@ The supplied stock Camera 5.18.11 APK shows that Fragment Storage is stored in `
 1. The app always starts with **Monitoring OFF** and **Wi-Fi file access OFF**.
 2. The default/reset Recording folder is `/sdcard/DCIM/Videos/Stitched`; the user can select another folder.
 3. The default/reset OUTPUT folder is `/sdcard/DCIM/Videos/Stitched`; selecting another valid OUTPUT folder commits it immediately, even while Monitoring is already running.
-4. The app creates/opens the three cumulative reports at the OUTPUT root: `GOOD.TXT`, `FAILED.TXT`, `ERROR.TXT`.
+4. The app creates/opens `GOOD/GOOD.TXT`, `FAILED/FAILED.TXT`, and `ERROR/ERROR.TXT` under the OUTPUT root.
 5. The selected Recording folder is watched by FileObserver and a 5-second scanner. The active Pilot recording is never parsed/moved/deleted.
 6. Camera `addFile` completion gets a short 2-second settling guard; filesystem-only fallback still uses the conservative 30-second stability gate. The finalized MP4 must then pass ISO-BMFF readiness checks; CAMM GPS is extracted and validated.
-7. A `dd-mm-yyyy` subfolder is created below OUTPUT before media transfer. The MP4 and GPX are verified there before source cleanup.
-8. GOOD / FAILED / ERROR is appended to the corresponding cumulative TXT file at the OUTPUT root.
-9. START MONITORING first preflights the OUTPUT root and creates/verifies all three TXT files; if this fails, Monitoring is not started and the UI reports the storage error.
+7. The result status is determined before transfer: no gap over 5 seconds = GOOD, a gap over 5 seconds = FAILED, and extraction/validation/processing failure = ERROR.
+8. Media is verified under `OUTPUT/<STATUS>/dd-mm-yyyy/` before source cleanup, and the result is appended to `OUTPUT/<STATUS>/<STATUS>.TXT`.
+9. START MONITORING preflights the OUTPUT root and creates/verifies all three status folders/report files; if this fails, Monitoring is not started and the UI reports the storage error.
 
 The dashboard API also exposes the live Monitoring-service state and report health (destination, existence/readability/writability and sizes of all three global TXT files) so the Client can distinguish a real empty report from a missing/unreadable report.
 
@@ -72,20 +90,26 @@ New output is organized as:
 
 ```text
 OUTPUT/
-├── GOOD.TXT                  # cumulative, all dates
-├── FAILED.TXT                # cumulative, all dates
-├── ERROR.TXT                 # cumulative, all dates
-├── 11-08-2026/
-│   ├── recording-001.mp4
-│   ├── recording-001.gpx
-│   └── ...
-└── 12-08-2026/
-    └── ...
+├── GOOD/
+│   ├── GOOD.TXT              # cumulative GOOD report
+│   └── 17-08-2026/
+│       ├── recording-001.mp4
+│       ├── recording-001.gpx
+│       └── recording-001_backup.gpx   # optional manual Client upload
+├── FAILED/
+│   ├── FAILED.TXT            # cumulative FAILED report
+│   └── 17-08-2026/
+│       ├── recording-002.mp4
+│       └── recording-002.gpx
+└── ERROR/
+    ├── ERROR.TXT             # cumulative ERROR report
+    └── 17-08-2026/
+        └── recording-003.mp4
 ```
 
 Date folders contain media/GPX only; no daily TXT reports are created there. Legacy files/folders made by older releases are not automatically deleted.
 
-A zero-byte MP4 is never treated as a valid recording. If it remains unchanged for two minutes while Pilot is not recording, it is removed as a stale placeholder and logged to global `ERROR.TXT`.
+A zero-byte MP4 is never treated as a valid recording. If it remains unchanged for two minutes while Pilot is not recording, it is preserved as error evidence under `OUTPUT/ERROR/dd-MM-yyyy/` and logged to `OUTPUT/ERROR/ERROR.TXT`.
 
 ## Wi-Fi service
 

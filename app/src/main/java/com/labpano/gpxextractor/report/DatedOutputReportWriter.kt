@@ -13,7 +13,7 @@ import java.util.TimeZone
 /**
  * Legacy day-specific report writer retained only for compatibility/tests.
  * Production processing no longer calls this class as of 0.5.19; all reports are cumulative and
- * live at the selected OUTPUT root, while date subfolders contain media/GPX only.
+ * now live at the OUTPUT root, while date/status subfolders contain media/GPX and per-recording reports.
  */
 @Deprecated("Daily TXT reports are no longer part of the production output layout")
 class DatedOutputReportWriter(private val reportDirectory: File) {

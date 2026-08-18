@@ -16,6 +16,7 @@ import com.labpano.gpxextractor.mp4.Mp4ReadinessChecker
 import com.labpano.gpxextractor.output.DatedOutputLayout
 import com.labpano.gpxextractor.output.OutputMover
 import com.labpano.gpxextractor.report.GlobalOutputReportStore
+import com.labpano.gpxextractor.report.RecordingResultReportStore
 import com.labpano.gpxextractor.ui.MainActivity
 import com.labpano.gpxextractor.util.AppLog
 import java.io.File
@@ -69,6 +70,7 @@ class RecordingProcessingEngine(
     private val gpxWriter = GpxWriter()
     private val outputMover = OutputMover(context)
     private val reportStore = GlobalOutputReportStore(context)
+    private val recordingReportStore = RecordingResultReportStore(context)
 
     fun start() {
         if (!running.compareAndSet(false, true)) return
@@ -76,8 +78,8 @@ class RecordingProcessingEngine(
             if (!recordingDirectory.exists() && !recordingDirectory.mkdirs()) {
                 throw IllegalStateException("Cannot create or access recording directory: ${recordingDirectory.absolutePath}")
             }
-            // The OUTPUT root owns exactly the three cumulative report files. Creating them here
-            // makes report availability independent of whether a recording has completed yet.
+            // Create the three root-level cumulative TXT reports up front, independent of whether
+            // a recording has completed yet. Date/status media folders are created on demand.
             reportStore.ensureReportFiles()
             processedStore.prune()
             recoverMovedTransactions()
@@ -431,7 +433,9 @@ class RecordingProcessingEngine(
                         file,
                         fileSize,
                         modifiedAt,
-                        "Generated GPX does not overlap the MP4 video timeline"
+                        "Generated GPX does not overlap the MP4 video timeline",
+                        videoStartMillis = parseResult.timing.videoStartMillis,
+                        videoEndMillis = parseResult.timing.videoEndMillis
                     )
                     return
                 }
@@ -442,7 +446,9 @@ class RecordingProcessingEngine(
                         file,
                         fileSize,
                         modifiedAt,
-                        "Invalid GPS data: ${validation.errors.joinToString("; ")}"
+                        "Invalid GPS data: ${validation.errors.joinToString("; ")}",
+                        videoStartMillis = parseResult.timing.videoStartMillis,
+                        videoEndMillis = parseResult.timing.videoEndMillis
                     )
                     return
                 }
@@ -473,7 +479,7 @@ class RecordingProcessingEngine(
                 val finalLocalGpx = finalizeLocalGpx(file, requireNotNull(temporaryGpx))
                 temporaryGpx = finalLocalGpx
                 val status = if (gapWarning == null) ProcessingStatus.GOOD else ProcessingStatus.FAILED
-                val layout = DatedOutputLayout.now()
+                val layout = DatedOutputLayout.forRecording(file.name)
                 val treeUri = resolveOutputTreeUri()
                 val directory = if (treeUri == null) resolveOutputDirectory() else null
                 val gpxSizeBeforeMove = finalLocalGpx.length()
@@ -487,6 +493,10 @@ class RecordingProcessingEngine(
                         append("; interpolationIntervalMs=").append(dense.effectiveIntervalMillis)
                         append("; interpolationLimited=").append(dense.interpolationLimited)
                         append("; timestampAnchor=").append(parseResult.timing.anchorSource)
+                        append("; timelineStrategy=").append(parseResult.timing.timelineStrategy)
+                        append("; rawGpsClockDiscontinuities=").append(parseResult.timing.rawGpsClockDiscontinuityCount)
+                        append("; decodedGpsSamples=").append(parseResult.timing.decodedGpsSampleCount)
+                        append("; canonicalGpsSamples=").append(parseResult.timing.canonicalGpsSampleCount)
                         append("; timestampShiftMs=").append(parseResult.timing.appliedTimestampShiftMillis)
                         append("; videoStartUtc=").append(parseResult.timing.videoStartMillis?.let(::utcTimestamp) ?: "unknown")
                         append("; videoEndUtc=").append(parseResult.timing.videoEndMillis?.let(::utcTimestamp) ?: "unknown")
@@ -501,7 +511,9 @@ class RecordingProcessingEngine(
                     }
                     return journalEntry(
                         transactionId, file, fileSize, modifiedAt, status, message,
-                        layout, directory, treeUri, result, gpxSizeBeforeMove
+                        layout, directory, treeUri, result, gpxSizeBeforeMove,
+                        videoStartMillis = parseResult.timing.videoStartMillis,
+                        videoEndMillis = parseResult.timing.videoEndMillis
                     )
                 }
                 val moved = outputMover.movePair(
@@ -561,9 +573,16 @@ class RecordingProcessingEngine(
         file: File,
         fileSize: Long,
         modifiedAt: Long,
-        reason: String
+        reason: String,
+        videoStartMillis: Long? = null,
+        videoEndMillis: Long? = null
     ) {
-        val layout = DatedOutputLayout.now()
+        val fallbackTimeline = if (videoStartMillis == null || videoEndMillis == null || videoEndMillis <= videoStartMillis) {
+            runCatching { cammParser.inspectVideoTimeline(file) }.getOrNull()
+        } else null
+        val resolvedVideoStart = videoStartMillis ?: fallbackTimeline?.startMillis
+        val resolvedVideoEnd = videoEndMillis ?: fallbackTimeline?.endMillis
+        val layout = DatedOutputLayout.forRecording(file.name)
         val treeUri = resolveOutputTreeUri()
         val directory = if (treeUri == null) resolveOutputDirectory() else null
         val localGpx = File(file.parentFile, "${file.nameWithoutExtension}.gpx")
@@ -574,7 +593,9 @@ class RecordingProcessingEngine(
                 "destination=${result.destination}; cleanupPending=${result.sourceCleanupPending}; transactionId=$transactionId"
             return journalEntry(
                 transactionId, file, fileSize, modifiedAt, ProcessingStatus.ERROR, message,
-                layout, directory, treeUri, result, gpxSizeBeforeMove
+                layout, directory, treeUri, result, gpxSizeBeforeMove,
+                videoStartMillis = resolvedVideoStart,
+                videoEndMillis = resolvedVideoEnd
             )
         }
         val persistBeforeCleanup: (OutputMover.Result) -> Unit = { prepared ->
@@ -610,7 +631,9 @@ class RecordingProcessingEngine(
         outputDirectory: File?,
         outputTreeUri: Uri?,
         moved: OutputMover.Result,
-        gpxSizeBytes: Long
+        gpxSizeBytes: Long,
+        videoStartMillis: Long? = null,
+        videoEndMillis: Long? = null
     ): ProcessedRecordingStore.TransferJournalEntry = ProcessedRecordingStore.TransferJournalEntry(
         transactionId = transactionId,
         sourcePath = source.absolutePath,
@@ -627,6 +650,8 @@ class RecordingProcessingEngine(
         gpxName = moved.gpxName,
         gpxPath = moved.gpxPath,
         gpxSizeBytes = gpxSizeBytes,
+        videoStartMillis = videoStartMillis,
+        videoEndMillis = videoEndMillis,
         cleanupPending = moved.sourceCleanupPending,
         state = ProcessedRecordingStore.STATE_MOVED,
         createdAt = System.currentTimeMillis()
@@ -658,9 +683,8 @@ class RecordingProcessingEngine(
             storedReportDestination
         }
 
-        // Reports live only at the OUTPUT root. Date subfolders contain media/GPX only.
-        // Ensure all cumulative TXT files exist at the *actual* destination before appending. This
-        // also covers changing OUTPUT while monitoring is already running.
+        // Cumulative reports live at OUTPUT/GOOD.TXT, FAILED.TXT and ERROR.TXT. Recording media
+        // lives in OUTPUT/dd-mm-yyyy/<STATUS>/ with a per-recording status TXT beside it.
         reportStore.ensureReportFiles(reportDestination)
         reportStore.appendOnce(
             status = entry.status,
@@ -669,19 +693,34 @@ class RecordingProcessingEngine(
             transactionId = duplicateMarker,
             destination = reportDestination
         )
+        recordingReportStore.write(
+            status = entry.status,
+            date = entry.outputDate,
+            videoName = entry.videoName,
+            sourcePath = entry.sourcePath,
+            message = entry.message,
+            transactionId = entry.transactionId,
+            processedAtMillis = entry.createdAt,
+            destination = reportDestination
+        )
 
-        if (entry.status == ProcessingStatus.GOOD || entry.status == ProcessingStatus.FAILED) {
-            val gpxName = requireNotNull(entry.gpxName)
+        val validVideoInterval = entry.videoStartMillis != null && entry.videoEndMillis != null &&
+            entry.videoStartMillis > 0L && entry.videoEndMillis > entry.videoStartMillis
+        if (entry.status == ProcessingStatus.GOOD || entry.status == ProcessingStatus.FAILED ||
+            (entry.status == ProcessingStatus.ERROR && validVideoInterval)
+        ) {
+            val gpxName = entry.gpxName.orEmpty()
             val videoPath = entry.videoPath?.takeIf { it.isNotBlank() }
                 ?: File(entry.destination, entry.videoName).absolutePath
-            val gpxPath = entry.gpxPath?.takeIf { it.isNotBlank() }
-                ?: File(entry.destination, gpxName).absolutePath
-            val gpxSize = if (gpxPath.startsWith("content://", ignoreCase = true)) {
-                entry.gpxSizeBytes
-            } else {
-                File(gpxPath).takeIf { it.isFile }?.length() ?: entry.gpxSizeBytes
+            val gpxPath = entry.gpxPath.orEmpty()
+            val gpxSize = when {
+                gpxPath.isBlank() -> 0L
+                gpxPath.startsWith("content://", ignoreCase = true) -> entry.gpxSizeBytes
+                else -> File(gpxPath).takeIf { it.isFile }?.length() ?: entry.gpxSizeBytes
             }
-            if (gpxSize <= 0L) throw IllegalStateException("Moved GPX is unavailable for queue: $gpxPath")
+            if (entry.status != ProcessingStatus.ERROR && (gpxName.isBlank() || gpxPath.isBlank() || gpxSize <= 0L)) {
+                throw IllegalStateException("Moved GPX is unavailable for queue: $gpxPath")
+            }
             processedStore.enqueuePendingGpx(
                 ProcessedRecordingStore.PendingGpxEntry(
                     id = entry.transactionId,
@@ -691,7 +730,9 @@ class RecordingProcessingEngine(
                     videoPath = videoPath,
                     gpxName = gpxName,
                     gpxPath = gpxPath,
-                    gpxSizeBytes = gpxSize
+                    gpxSizeBytes = gpxSize,
+                    videoStartMillis = entry.videoStartMillis,
+                    videoEndMillis = entry.videoEndMillis
                 )
             )
         }
@@ -728,25 +769,17 @@ class RecordingProcessingEngine(
             return
         }
 
-        val path = file.absolutePath
+        // Preserve even a zero-byte finalized placeholder in ERROR rather than deleting evidence.
+        // OutputMover explicitly supports an expected 0-byte video for this quarantine path.
         try {
-            if (!file.delete()) throw IllegalStateException("Cannot remove stale zero-byte MP4 placeholder")
-            val transactionId = UUID.randomUUID().toString()
-            val message = "Removed stale zero-byte MP4 placeholder; no video data was available; transactionId=$transactionId"
-            val destination = reportStore.currentDestination()
-            reportStore.ensureReportFiles(destination)
-            reportStore.appendOnce(
-                ProcessingStatus.ERROR,
-                path,
-                message,
-                transactionId = null,
-                destination = destination
+            quarantinePermanentError(
+                file = file,
+                fileSize = 0L,
+                modifiedAt = modifiedAt,
+                reason = "Stale zero-byte MP4 placeholder; no video data was available"
             )
-            processedStore.saveFinal(path, 0L, modifiedAt, ProcessingStatus.ERROR, message)
-            candidates.remove(path)
-            statusPublisher(RecordingMonitorService.STATUS_FAILED_PREFIX + file.name + " (removed stale 0-byte file; logged as ERROR)")
         } catch (error: Throwable) {
-            AppLog.error("Cannot clean stale zero-byte MP4 ${file.absolutePath}", error)
+            AppLog.error("Cannot quarantine stale zero-byte MP4 ${file.absolutePath}", error)
             resetWaiting(file)
         }
     }

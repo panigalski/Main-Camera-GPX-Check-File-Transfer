@@ -28,7 +28,10 @@ class ProcessedRecordingStore(context: Context) : SQLiteOpenHelper(
         val videoPath: String,
         val gpxName: String,
         val gpxPath: String,
-        val gpxSizeBytes: Long
+        val gpxSizeBytes: Long,
+        /** Canonical MP4 movie interval used by the GPX parser; null for legacy queue rows. */
+        val videoStartMillis: Long? = null,
+        val videoEndMillis: Long? = null
     )
 
     data class TransferJournalEntry(
@@ -47,6 +50,8 @@ class ProcessedRecordingStore(context: Context) : SQLiteOpenHelper(
         val gpxName: String?,
         val gpxPath: String?,
         val gpxSizeBytes: Long,
+        val videoStartMillis: Long? = null,
+        val videoEndMillis: Long? = null,
         val cleanupPending: Boolean,
         val state: String,
         val createdAt: Long
@@ -79,6 +84,12 @@ class ProcessedRecordingStore(context: Context) : SQLiteOpenHelper(
         if (oldVersion < 6) {
             addColumnIfMissing(db, "transfer_journal", "video_path TEXT")
             addColumnIfMissing(db, "transfer_journal", "gpx_path TEXT")
+        }
+        if (oldVersion < 8) {
+            addColumnIfMissing(db, "pending_gpx_queue", "video_start_millis INTEGER")
+            addColumnIfMissing(db, "pending_gpx_queue", "video_end_millis INTEGER")
+            addColumnIfMissing(db, "transfer_journal", "video_start_millis INTEGER")
+            addColumnIfMissing(db, "transfer_journal", "video_end_millis INTEGER")
         }
         // Ensure indexes also exist when upgrading an existing database.
         createProcessedTable(db)
@@ -121,6 +132,8 @@ class ProcessedRecordingStore(context: Context) : SQLiteOpenHelper(
                 gpx_name TEXT NOT NULL,
                 gpx_path TEXT NOT NULL,
                 gpx_size_bytes INTEGER NOT NULL,
+                video_start_millis INTEGER,
+                video_end_millis INTEGER,
                 created_at INTEGER NOT NULL
             )
             """.trimIndent()
@@ -149,6 +162,8 @@ class ProcessedRecordingStore(context: Context) : SQLiteOpenHelper(
                 gpx_name TEXT,
                 gpx_path TEXT,
                 gpx_size_bytes INTEGER NOT NULL DEFAULT 0,
+                video_start_millis INTEGER,
+                video_end_millis INTEGER,
                 cleanup_pending INTEGER NOT NULL DEFAULT 0,
                 state TEXT NOT NULL,
                 created_at INTEGER NOT NULL,
@@ -292,6 +307,8 @@ class ProcessedRecordingStore(context: Context) : SQLiteOpenHelper(
             put("gpx_name", entry.gpxName)
             put("gpx_path", entry.gpxPath)
             put("gpx_size_bytes", entry.gpxSizeBytes)
+            if (entry.videoStartMillis != null) put("video_start_millis", entry.videoStartMillis) else putNull("video_start_millis")
+            if (entry.videoEndMillis != null) put("video_end_millis", entry.videoEndMillis) else putNull("video_end_millis")
             put("cleanup_pending", if (entry.cleanupPending) 1 else 0)
             put("state", entry.state)
             put("created_at", entry.createdAt)
@@ -348,9 +365,11 @@ class ProcessedRecordingStore(context: Context) : SQLiteOpenHelper(
                     gpxName = cursor.getStringOrNull(12),
                     gpxPath = cursor.getStringOrNull(13),
                     gpxSizeBytes = cursor.getLong(14),
-                    cleanupPending = cursor.getInt(15) == 1,
-                    state = cursor.getString(16),
-                    createdAt = cursor.getLong(17)
+                    videoStartMillis = cursor.getLongOrNull(15),
+                    videoEndMillis = cursor.getLongOrNull(16),
+                    cleanupPending = cursor.getInt(17) == 1,
+                    state = cursor.getString(18),
+                    createdAt = cursor.getLong(19)
                 )
             }
         }
@@ -381,6 +400,8 @@ class ProcessedRecordingStore(context: Context) : SQLiteOpenHelper(
             put("gpx_name", entry.gpxName)
             put("gpx_path", entry.gpxPath)
             put("gpx_size_bytes", entry.gpxSizeBytes)
+            if (entry.videoStartMillis != null) put("video_start_millis", entry.videoStartMillis) else putNull("video_start_millis")
+            if (entry.videoEndMillis != null) put("video_end_millis", entry.videoEndMillis) else putNull("video_end_millis")
             put("created_at", System.currentTimeMillis())
         }
         writableDatabase.insertWithOnConflict(
@@ -391,7 +412,7 @@ class ProcessedRecordingStore(context: Context) : SQLiteOpenHelper(
         )
     }
 
-    fun listPendingGpx(limit: Int, offset: Int): List<PendingGpxEntry> {
+    fun listPendingGpx(limit: Int, offset: Int, includeMediaOnly: Boolean = false): List<PendingGpxEntry> {
         val safeLimit = limit.coerceIn(1, AppConfig.MAX_PENDING_API_PAGE_SIZE)
         val safeOffset = offset.coerceAtLeast(0)
         val result = mutableListOf<PendingGpxEntry>()
@@ -399,9 +420,13 @@ class ProcessedRecordingStore(context: Context) : SQLiteOpenHelper(
             "pending_gpx_queue",
             arrayOf(
                 "id", "status", "completed_at", "video_name", "video_path",
-                "gpx_name", "gpx_path", "gpx_size_bytes"
+                "gpx_name", "gpx_path", "gpx_size_bytes", "video_start_millis", "video_end_millis"
             ),
-            null,
+            if (includeMediaOnly) {
+                "(gpx_size_bytes > 0 OR (video_start_millis IS NOT NULL AND video_end_millis IS NOT NULL AND video_end_millis > video_start_millis))"
+            } else {
+                "gpx_size_bytes > 0"
+            },
             null,
             null,
             null,
@@ -417,7 +442,9 @@ class ProcessedRecordingStore(context: Context) : SQLiteOpenHelper(
                     videoPath = cursor.getString(4),
                     gpxName = cursor.getString(5),
                     gpxPath = cursor.getString(6),
-                    gpxSizeBytes = cursor.getLong(7)
+                    gpxSizeBytes = cursor.getLong(7),
+                    videoStartMillis = cursor.getLongOrNull(8),
+                    videoEndMillis = cursor.getLongOrNull(9)
                 )
             }
         }
@@ -430,7 +457,7 @@ class ProcessedRecordingStore(context: Context) : SQLiteOpenHelper(
             "pending_gpx_queue",
             arrayOf(
                 "id", "status", "completed_at", "video_name", "video_path",
-                "gpx_name", "gpx_path", "gpx_size_bytes"
+                "gpx_name", "gpx_path", "gpx_size_bytes", "video_start_millis", "video_end_millis"
             ),
             "id = ?",
             arrayOf(id),
@@ -448,15 +475,26 @@ class ProcessedRecordingStore(context: Context) : SQLiteOpenHelper(
                 videoPath = cursor.getString(4),
                 gpxName = cursor.getString(5),
                 gpxPath = cursor.getString(6),
-                gpxSizeBytes = cursor.getLong(7)
+                gpxSizeBytes = cursor.getLong(7),
+                videoStartMillis = cursor.getLongOrNull(8),
+                videoEndMillis = cursor.getLongOrNull(9)
             )
         }
     }
 
-    fun pendingGpxCount(): Long =
-        readableDatabase.rawQuery("SELECT COUNT(*) FROM pending_gpx_queue", null).use { cursor ->
+    fun pendingGpxCount(includeMediaOnly: Boolean = false): Long {
+        val where = if (includeMediaOnly) {
+            "(gpx_size_bytes > 0 OR (video_start_millis IS NOT NULL AND video_end_millis IS NOT NULL AND video_end_millis > video_start_millis))"
+        } else {
+            "gpx_size_bytes > 0"
+        }
+        return readableDatabase.rawQuery(
+            "SELECT COUNT(*) FROM pending_gpx_queue WHERE $where",
+            null
+        ).use { cursor ->
             if (cursor.moveToFirst()) cursor.getLong(0) else 0L
         }
+    }
 
     fun prune(now: Long = System.currentTimeMillis()) {
         val database = writableDatabase
@@ -558,6 +596,9 @@ class ProcessedRecordingStore(context: Context) : SQLiteOpenHelper(
     private fun android.database.Cursor.getStringOrNull(index: Int): String? =
         if (isNull(index)) null else getString(index)
 
+    private fun android.database.Cursor.getLongOrNull(index: Int): Long? =
+        if (isNull(index)) null else getLong(index)
+
     companion object {
         const val STATE_MOVED = "MOVED"
         const val STATE_COMMITTED = "COMMITTED"
@@ -566,7 +607,7 @@ class ProcessedRecordingStore(context: Context) : SQLiteOpenHelper(
             "transaction_id", "source_path", "source_size", "source_modified_at", "status",
             "message", "output_date", "output_directory", "output_tree_uri", "destination",
             "video_name", "video_path", "gpx_name", "gpx_path", "gpx_size_bytes",
-            "cleanup_pending", "state", "created_at"
+            "video_start_millis", "video_end_millis", "cleanup_pending", "state", "created_at"
         )
     }
 }

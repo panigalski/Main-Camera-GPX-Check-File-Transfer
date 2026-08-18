@@ -218,7 +218,7 @@ class MainActivity : Activity() {
                 setPadding(gap, gap, gap, gap)
             })
             addView(TextView(this@MainActivity).apply {
-                text = "Valid GPS always produces a GPX. Completed MP4/GPX files are moved into OUTPUT/dd-mm-yyyy/. The OUTPUT root keeps only the cumulative GOOD.TXT, FAILED.TXT and ERROR.TXT reports."
+                text = "Completed recordings are classified into OUTPUT/dd-mm-yyyy/GOOD/, FAILED/ or ERROR/. Cumulative GOOD.TXT, FAILED.TXT and ERROR.TXT reports stay at the OUTPUT root, and each recording also gets its own status TXT beside the media."
                 textSize = 11f
                 setPadding(gap, gap, gap, gap)
             })

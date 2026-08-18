@@ -1,5 +1,21 @@
 # Changelog
 
+## 0.5.43
+- Changed classified OUTPUT layout to date-first folders: `OUTPUT/dd-MM-yyyy/GOOD/`, `FAILED/`, and `ERROR/`.
+- Moved cumulative `GOOD.TXT`, `FAILED.TXT`, and `ERROR.TXT` reports to the OUTPUT root; existing 0.5.42 nested cumulative reports are read/migrated for compatibility.
+- Added one per-recording status report beside each result, named `<MP4-base>_ GOOD.txt`, `<MP4-base>_ FAILED.txt`, or `<MP4-base>_ ERROR.txt`.
+- Creates all three GOOD/FAILED/ERROR sibling folders for each recording date once that date is processed.
+- Updated manual Client `_backup.gpx` uploads to `OUTPUT/dd-MM-yyyy/<STATUS>/` so backup GPX files sit beside the matching MP4/Camera GPX/status TXT.
+
+## 0.5.42
+- Rebuilt CAMM timestamp synchronization around MP4/CAMM presentation time. Type-6 GPS absolute time is now an absolute-start candidate/diagnostic rather than the per-sample pacing clock, preventing false gaps caused by mid-recording GPS-clock jumps.
+- Added timing diagnostics for canonical timeline strategy, raw GPS-clock discontinuities and decoded/canonical sample counts.
+- Preserved the strict gap rule: exactly 5.000 seconds passes; anything greater than 5 seconds is FAILED.
+- Classified processed media into `OUTPUT/GOOD/dd-MM-yyyy/`, `OUTPUT/FAILED/dd-MM-yyyy/`, and `OUTPUT/ERROR/dd-MM-yyyy/`; cumulative reports now live at `OUTPUT/GOOD/GOOD.TXT`, `OUTPUT/FAILED/FAILED.TXT`, and `OUTPUT/ERROR/ERROR.TXT`.
+- Added full MP4 start/end times to the durable pending-media queue and an opt-in `includeMediaOnly=1` API mode, allowing Client 1.10.30 to back up ERROR videos without depending on an extracted Camera GPX.
+- Manual Client backup GPX uploads now require GOOD/FAILED/ERROR classification and are stored beside the matching recording in `OUTPUT/<STATUS>/dd-MM-yyyy/`.
+- Hardened zero-byte ERROR quarantine so finalized empty placeholders are retained as error evidence instead of being silently deleted.
+
 ## 0.5.41
 - Added the restricted `POST /api/v1/backup-gpx-upload` endpoint used only by the Client's manual **Send GPX Files** action.
 - Uploaded Client backup GPX files are written under the configured Output Folder in the matching `dd-MM-yyyy/` subfolder.

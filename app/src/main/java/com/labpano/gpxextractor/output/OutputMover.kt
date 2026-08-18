@@ -602,7 +602,7 @@ class OutputMover(private val context: Context) {
     }
 
     private fun verifyLocalDestination(file: File, expectedSize: Long, label: String) {
-        if (!file.isFile || file.length() != expectedSize || file.length() <= 0L) {
+        if (!file.isFile || file.length() != expectedSize || expectedSize < 0L) {
             throw IOException("Move verification failed: destination $label is missing or has the wrong size")
         }
     }
@@ -802,7 +802,7 @@ class OutputMover(private val context: Context) {
             snapshot.assertUnchanged(source)
             TransferProgressRegistry.phase(progressId, "VERIFYING")
             verifyLocalDestination(temporary, snapshot.length, source.name)
-            if (!sampledLocalContentMatches(source, temporary)) {
+            if (snapshot.length > 0L && !sampledLocalContentMatches(source, temporary)) {
                 throw IOException("Copy verification failed for ${source.name}")
             }
             TransferProgressRegistry.phase(progressId, "FINALIZING")

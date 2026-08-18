@@ -69,7 +69,7 @@ class LabpanoApplication : Application() {
         }
 
         // Keep diagnostics private. The shared recording/output root is intentionally limited to
-        // GOOD.TXT, FAILED.TXT and ERROR.TXT plus recording media/GPX files.
+        // Root GOOD.TXT, FAILED.TXT and ERROR.TXT plus date/status recording media/GPX files.
         val target = File(filesDir, "CRASH.TXT")
         runCatching {
             target.parentFile?.mkdirs()
