@@ -15,8 +15,8 @@ import com.labpano.gpxextractor.mp4.Mp4Exception
 import com.labpano.gpxextractor.mp4.Mp4ReadinessChecker
 import com.labpano.gpxextractor.output.DatedOutputLayout
 import com.labpano.gpxextractor.output.OutputMover
+import com.labpano.gpxextractor.output.ProcessingFolderCleanup
 import com.labpano.gpxextractor.report.GlobalOutputReportStore
-import com.labpano.gpxextractor.report.RecordingResultReportStore
 import com.labpano.gpxextractor.ui.MainActivity
 import com.labpano.gpxextractor.util.AppLog
 import java.io.File
@@ -70,7 +70,6 @@ class RecordingProcessingEngine(
     private val gpxWriter = GpxWriter()
     private val outputMover = OutputMover(context)
     private val reportStore = GlobalOutputReportStore(context)
-    private val recordingReportStore = RecordingResultReportStore(context)
 
     fun start() {
         if (!running.compareAndSet(false, true)) return
@@ -78,9 +77,10 @@ class RecordingProcessingEngine(
             if (!recordingDirectory.exists() && !recordingDirectory.mkdirs()) {
                 throw IllegalStateException("Cannot create or access recording directory: ${recordingDirectory.absolutePath}")
             }
-            // Create the three root-level cumulative TXT reports up front, independent of whether
-            // a recording has completed yet. Date/status media folders are created on demand.
+            // Validate the OUTPUT root and migrate obsolete report layouts. The current daily
+            // date/status reports are created only when the first recording for that date commits.
             reportStore.ensureReportFiles()
+            ProcessingFolderCleanup.cleanup(context, reportStore.currentDestination())
             processedStore.prune()
             recoverMovedTransactions()
             val initialMp4s = currentMp4Files()
@@ -188,6 +188,7 @@ class RecordingProcessingEngine(
         running.set(false)
         scheduler.shutdownNow()
         consumer.shutdownNow()
+        ProcessingFolderCleanup.cleanup(context, reportStore.currentDestination())
         runCatching { scheduler.awaitTermination(2, TimeUnit.SECONDS) }
         runCatching { consumer.awaitTermination(5, TimeUnit.SECONDS) }
         candidates.clear()
@@ -683,27 +684,19 @@ class RecordingProcessingEngine(
             storedReportDestination
         }
 
-        // Cumulative reports live at OUTPUT/GOOD.TXT, FAILED.TXT and ERROR.TXT. Recording media
-        // lives in OUTPUT/dd-mm-yyyy/<STATUS>/ with a per-recording status TXT beside it.
+        // Keep both cumulative OUTPUT/<STATUS>.TXT reports and daily reports beside classified
+        // media in OUTPUT/dd-MM-yyyy/<STATUS>/. No per-recording TXT files are created.
         reportStore.ensureReportFiles(reportDestination)
+        reportStore.ensureDailyReportFiles(entry.outputDate, reportDestination)
         reportStore.appendOnce(
             status = entry.status,
             sourcePath = entry.sourcePath,
             message = entry.message,
             transactionId = duplicateMarker,
-            destination = reportDestination
+            destination = reportDestination,
+            outputDate = entry.outputDate
         )
-        recordingReportStore.write(
-            status = entry.status,
-            date = entry.outputDate,
-            videoName = entry.videoName,
-            sourcePath = entry.sourcePath,
-            message = entry.message,
-            transactionId = entry.transactionId,
-            processedAtMillis = entry.createdAt,
-            destination = reportDestination
-        )
-
+        ProcessingFolderCleanup.cleanup(context, reportDestination)
         val validVideoInterval = entry.videoStartMillis != null && entry.videoEndMillis != null &&
             entry.videoStartMillis > 0L && entry.videoEndMillis > entry.videoStartMillis
         if (entry.status == ProcessingStatus.GOOD || entry.status == ProcessingStatus.FAILED ||

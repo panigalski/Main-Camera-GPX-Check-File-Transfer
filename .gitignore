@@ -1,23 +1,31 @@
-# Gradle and Android Studio
+# Gradle / Android build output
 .gradle/
-.idea/
 **/build/
-local.properties
-*.iml
-captures/
 .externalNativeBuild/
 .cxx/
+captures/
+
+# Android Studio / IntelliJ
+.idea/
+*.iml
+out/
+
+# Local SDK / machine-specific configuration
+local.properties
 
 # Signing credentials and generated packages
 keystore.properties
-release-keystore.jks
 *.jks
 *.keystore
 *.apk
 *.aab
 
-# Operating-system and editor files
-.DS_Store
-Thumbs.db
+# Logs / temporary files
+*.log
+*.tmp
 *.swp
 *.swo
+
+# Operating-system metadata
+.DS_Store
+Thumbs.db

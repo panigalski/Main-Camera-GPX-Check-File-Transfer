@@ -218,7 +218,7 @@ class MainActivity : Activity() {
                 setPadding(gap, gap, gap, gap)
             })
             addView(TextView(this@MainActivity).apply {
-                text = "Completed recordings are classified into OUTPUT/dd-mm-yyyy/GOOD/, FAILED/ or ERROR/. Cumulative GOOD.TXT, FAILED.TXT and ERROR.TXT reports stay at the OUTPUT root, and each recording also gets its own status TXT beside the media."
+                text = "Completed recordings are classified into OUTPUT/dd-mm-yyyy/GOOD/, FAILED/ or ERROR/. OUTPUT also keeps cumulative GOOD.TXT, FAILED.TXT and ERROR.TXT reports, while each status folder contains its own dd-mm-yyyy_<STATUS>.txt daily report. Temporary PROCESSING folders are removed when empty."
                 textSize = 11f
                 setPadding(gap, gap, gap, gap)
             })
@@ -578,7 +578,7 @@ class MainActivity : Activity() {
             )
         } catch (error: Throwable) {
             showFolderAccessFailure(
-                "Cannot prepare OUTPUT reports: " + (error.message ?: error.javaClass.simpleName)
+                "Cannot prepare OUTPUT folder: " + (error.message ?: error.javaClass.simpleName)
             )
             return
         }
@@ -643,7 +643,7 @@ class MainActivity : Activity() {
             )
         } catch (error: Throwable) {
             showFolderAccessFailure(
-                "Cannot prepare OUTPUT reports: " + (error.message ?: error.javaClass.simpleName)
+                "Cannot prepare OUTPUT folder: " + (error.message ?: error.javaClass.simpleName)
             )
             return
         }
@@ -738,7 +738,7 @@ class MainActivity : Activity() {
             GlobalOutputReportStore(this).ensureReportFiles(reportDestination)
         } catch (error: Throwable) {
             showFolderAccessFailure(
-                "Cannot create GOOD.TXT, FAILED.TXT and ERROR.TXT in OUTPUT: " +
+                "Cannot prepare OUTPUT report storage: " +
                     (error.message ?: error.javaClass.simpleName)
             )
             return
@@ -754,7 +754,7 @@ class MainActivity : Activity() {
             }
             .apply()
 
-        // Folder probes and report-file creation have all succeeded at this point. Keep the
+        // Folder probes and report-storage validation have succeeded at this point. Keep the
         // button text as START MONITORING until RecordingMonitorService itself finishes engine +
         // FileObserver initialization and broadcasts STATUS_MONITORING.
         monitoringStartPending = true

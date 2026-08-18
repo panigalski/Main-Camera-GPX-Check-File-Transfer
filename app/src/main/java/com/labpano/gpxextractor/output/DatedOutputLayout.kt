@@ -12,24 +12,16 @@ data class DatedOutputLayout(val date: String) {
      * Classified media layout:
      *
      * OUTPUT/
-     *   GOOD.TXT
-     *   FAILED.TXT
-     *   ERROR.TXT
-     *   17-08-2026/GOOD/video.mp4 + video.gpx + video_ GOOD.txt
-     *   17-08-2026/FAILED/video.mp4 + video.gpx + video_ FAILED.txt
-     *   17-08-2026/ERROR/video.mp4 [+ partial gpx] + video_ ERROR.txt
+     *   17-08-2026/GOOD/video.mp4 + video.gpx + 17-08-2026_GOOD.txt
+     *   17-08-2026/FAILED/video.mp4 + video.gpx + 17-08-2026_FAILED.txt
+     *   17-08-2026/ERROR/video.mp4 [+ partial gpx] + 17-08-2026_ERROR.txt
      *
      * Date is the first path component so all results from one recording day stay together.
      */
     fun mediaSubfolder(status: ProcessingStatus): String = "$date/${status.name}"
 
     fun statusFolder(status: ProcessingStatus): String = status.name
-    fun reportFileName(status: ProcessingStatus): String = "${status.name}.TXT"
-
-    fun recordingReportFileName(videoName: String, status: ProcessingStatus): String {
-        val base = videoName.substringAfterLast('/').substringBeforeLast('.', videoName.substringAfterLast('/'))
-        return "${base}_ ${status.name}.txt"
-    }
+    fun reportFileName(status: ProcessingStatus): String = "${date}_${status.name}.txt"
 
     companion object {
         private const val TWO_DIGIT_YEAR_START_MILLIS = 946_684_800_000L // 2000-01-01 UTC

@@ -10,12 +10,7 @@ import java.util.Date
 import java.util.Locale
 import java.util.TimeZone
 
-/**
- * Legacy day-specific report writer retained only for compatibility/tests.
- * Production processing no longer calls this class as of 0.5.19; all reports are cumulative and
- * now live at the OUTPUT root, while date/status subfolders contain media/GPX and per-recording reports.
- */
-@Deprecated("Daily TXT reports are no longer part of the production output layout")
+/** Filesystem-only helper retained for unit tests and compatibility utilities. */
 class DatedOutputReportWriter(private val reportDirectory: File) {
     fun append(
         status: ProcessingStatus,
@@ -31,13 +26,8 @@ class DatedOutputReportWriter(private val reportDirectory: File) {
         transactionId: String?,
         layout: DatedOutputLayout
     ) = synchronized(ReportFileAccess.lock) {
-        val daily = File(reportDirectory, layout.date)
-        if (!daily.exists() && !daily.mkdirs()) {
-            throw IOException("Cannot create daily monitoring folder: ${daily.absolutePath}")
-        }
-
-        ensureDailyReportFiles(daily)
-        val report = File(daily, layout.reportFileName(status))
+        ensureDailyReportFiles(layout)
+        val report = reportFile(layout, status)
         val marker = transactionId?.let { "transactionId=$it" }
         if (marker != null && report.isFile && containsMarker(report, marker)) return@synchronized
 
@@ -50,14 +40,21 @@ class DatedOutputReportWriter(private val reportDirectory: File) {
         }
     }
 
-    private fun ensureDailyReportFiles(daily: File) {
+    private fun ensureDailyReportFiles(layout: DatedOutputLayout) {
         listOf(ProcessingStatus.GOOD, ProcessingStatus.FAILED, ProcessingStatus.ERROR).forEach { status ->
-            val report = File(daily, "${status.name}.TXT")
+            val folder = File(File(reportDirectory, layout.date), status.name)
+            if (!folder.exists() && !folder.mkdirs()) {
+                throw IOException("Cannot create daily report folder: ${folder.absolutePath}")
+            }
+            val report = reportFile(layout, status)
             if (!report.exists() && !report.createNewFile()) {
                 throw IOException("Cannot create daily report file: ${report.absolutePath}")
             }
         }
     }
+
+    private fun reportFile(layout: DatedOutputLayout, status: ProcessingStatus): File =
+        File(File(File(reportDirectory, layout.date), status.name), layout.reportFileName(status))
 
     private fun containsMarker(report: File, marker: String): Boolean {
         if (!report.isFile || report.length() == 0L) return false

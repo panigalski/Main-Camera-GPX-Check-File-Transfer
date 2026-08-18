@@ -313,7 +313,7 @@ class WifiFileServerService : Service() {
                 try {
                     importLegacyPendingQueue(store)
                 } finally {
-                    // Legacy import may be expensive on permanent cumulative logs. Attempt it once,
+                    // Legacy/daily report import may scan historical days. Attempt it once,
                     // never on every 3-second client synchronization when there is nothing to import.
                     migrationPrefs.edit().putBoolean(KEY_LEGACY_PENDING_IMPORT_DONE, true).apply()
                 }
@@ -471,40 +471,54 @@ class WifiFileServerService : Service() {
         val outputPath = preferences.getString(MainActivity.KEY_OUTPUT_DIRECTORY, null)
             ?.takeIf { it.isNotBlank() && !it.startsWith("content://") }
             ?: AppConfig.defaultOutputDirectory.absolutePath
-        listOf("GOOD" to "GOOD.TXT", "FAILED" to "FAILED.TXT").forEach reports@ { (status, reportName) ->
-            // 0.5.43+ stores cumulative reports at OUTPUT/<STATUS>.TXT. Also accept the
-            // 0.5.42 OUTPUT/<STATUS>/<STATUS>.TXT location for one-time migration.
-            val report = listOf(File(outputPath, reportName), File(File(outputPath, status), reportName))
-                .firstOrNull { it.isFile && it.canRead() } ?: return@reports
-            report.useLines(Charsets.UTF_8) { lines ->
-                lines.filter { it.isNotBlank() }.forEach entries@ { line ->
-                    val parts = line.split('\t', limit = 3)
-                    val completedAt = parts.getOrElse(0) { "" }
-                    val sourcePath = parts.getOrElse(1) { "" }
-                    val message = parts.getOrElse(2) { "" }
-                    val videoName = legacyMessageValue(message, "video") ?: File(sourcePath).name
-                    val gpxName = legacyMessageValue(message, "gpx")
-                        ?: videoName.replace(Regex("(?i)\\.mp4$"), ".gpx")
-                    val destination = legacyMessageValue(message, "destination")
-                        ?: legacyMessageValue(message, "movedTo")
-                        ?: return@entries
-                    val gpxFile = File(destination, gpxName)
-                    if (!gpxFile.isFile || gpxFile.length() <= 0L) return@entries
-                    store.enqueuePendingGpx(
-                        ProcessedRecordingStore.PendingGpxEntry(
-                            id = "legacy|$status|${gpxFile.absolutePath.lowercase(Locale.US)}",
-                            status = status,
-                            completedAt = completedAt,
-                            videoName = videoName,
-                            videoPath = File(destination, videoName).absolutePath,
-                            gpxName = gpxName,
-                            gpxPath = gpxFile.absolutePath,
-                            gpxSizeBytes = gpxFile.length()
+        listOf("GOOD", "FAILED").forEach { status ->
+            legacyAndDailyReports(File(outputPath), status).forEach { report ->
+                report.useLines(Charsets.UTF_8) { lines ->
+                    lines.filter { it.isNotBlank() }.forEach entries@ { line ->
+                        val parts = line.split('\t', limit = 3)
+                        val completedAt = parts.getOrElse(0) { "" }
+                        val sourcePath = parts.getOrElse(1) { "" }
+                        val message = parts.getOrElse(2) { "" }
+                        val videoName = legacyMessageValue(message, "video") ?: File(sourcePath).name
+                        val gpxName = legacyMessageValue(message, "gpx")
+                            ?: videoName.replace(Regex("(?i)\\.mp4$"), ".gpx")
+                        val destination = legacyMessageValue(message, "destination")
+                            ?: legacyMessageValue(message, "movedTo")
+                            ?: return@entries
+                        val gpxFile = File(destination, gpxName)
+                        if (!gpxFile.isFile || gpxFile.length() <= 0L) return@entries
+                        store.enqueuePendingGpx(
+                            ProcessedRecordingStore.PendingGpxEntry(
+                                id = "legacy|$status|${gpxFile.absolutePath.lowercase(Locale.US)}",
+                                status = status,
+                                completedAt = completedAt,
+                                videoName = videoName,
+                                videoPath = File(destination, videoName).absolutePath,
+                                gpxName = gpxName,
+                                gpxPath = gpxFile.absolutePath,
+                                gpxSizeBytes = gpxFile.length()
+                            )
                         )
-                    )
+                    }
                 }
             }
         }
+    }
+
+    private fun legacyAndDailyReports(outputRoot: File, status: String): List<File> {
+        val reports = linkedSetOf<File>()
+        // Current layout keeps both OUTPUT/<STATUS>.TXT and
+        // OUTPUT/dd-MM-yyyy/<STATUS>/dd-MM-yyyy_<STATUS>.txt.
+        outputRoot.listFiles()?.filter { it.isDirectory && it.name.matches(Regex("\\d{2}-\\d{2}-\\d{4}")) }
+            ?.sortedBy { it.name }
+            ?.forEach { day ->
+                File(File(day, status), "${day.name}_${status}.txt")
+                    .takeIf { it.isFile && it.canRead() }?.let(reports::add)
+            }
+        // Older layouts are accepted only as import sources.
+        File(outputRoot, "$status.TXT").takeIf { it.isFile && it.canRead() }?.let(reports::add)
+        File(File(outputRoot, status), "$status.TXT").takeIf { it.isFile && it.canRead() }?.let(reports::add)
+        return reports.toList()
     }
 
     private fun legacyMessageValue(message: String, key: String): String? =

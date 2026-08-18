@@ -1,5 +1,28 @@
 # Changelog
 
+## 0.5.46
+
+- Restored cumulative `GOOD.TXT`, `FAILED.TXT`, and `ERROR.TXT` files directly in the OUTPUT root while retaining the date/status daily reports introduced in 0.5.45.
+- Every committed recording is appended to both the cumulative root report and the matching `dd-MM-yyyy/<STATUS>/dd-MM-yyyy_<STATUS>.txt` daily report.
+- Added upgrade backfill from 0.5.45 daily reports when a cumulative root report is missing.
+- Report-entry deletion now removes the same entry from both cumulative and daily report copies.
+- Kept the no-per-video-TXT rule and empty legacy `PROCESSING` folder cleanup.
+
+## 0.5.45
+
+- Replaced root cumulative reports with recording-day reports stored inside each date/status folder: `dd-MM-yyyy/GOOD/dd-MM-yyyy_GOOD.txt`, `FAILED/dd-MM-yyyy_FAILED.txt`, and `ERROR/dd-MM-yyyy_ERROR.txt`.
+- Kept exactly one report per status per recording day; no per-video/per-segment TXT files are produced.
+- Dashboard report tails now aggregate across the daily files, preserving the existing Client API.
+- Added safe migration of obsolete 0.5.42–0.5.44 root/status cumulative report files into the new daily layout before deleting the old files.
+- Pending-GPX legacy import now understands the current daily-report layout while retaining older-layout compatibility.
+- Empty legacy `PROCESSING` folders continue to be removed; non-empty legacy folders remain protected.
+
+## 0.5.44
+- Removed per-recording/per-segment status TXT generation; only the cumulative root `GOOD.TXT`, `FAILED.TXT`, and `ERROR.TXT` reports remain.
+- Stopped creating `OUTPUT/dd-MM-yyyy/PROCESSING/` as a side effect of report generation.
+- Added safe cleanup of legacy empty `PROCESSING` folders on monitoring startup and after committed transactions; non-empty folders are preserved.
+- Updated the on-device Output Folder description and repository documentation for the simplified layout.
+
 ## 0.5.43
 - Changed classified OUTPUT layout to date-first folders: `OUTPUT/dd-MM-yyyy/GOOD/`, `FAILED/`, and `ERROR/`.
 - Moved cumulative `GOOD.TXT`, `FAILED.TXT`, and `ERROR.TXT` reports to the OUTPUT root; existing 0.5.42 nested cumulative reports are read/migrated for compatibility.

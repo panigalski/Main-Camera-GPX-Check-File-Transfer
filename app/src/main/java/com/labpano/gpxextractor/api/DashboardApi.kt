@@ -423,7 +423,7 @@ object DashboardApi {
         val lines = try {
             store.readTail(status, MAX_REPORT_ENTRIES)
         } catch (error: Throwable) {
-            readErrors += "${status.name}.TXT: ${error.message ?: error.javaClass.simpleName}"
+            readErrors += "${status.name} reports: ${error.message ?: error.javaClass.simpleName}"
             emptyList()
         }
         lines.forEach { line ->

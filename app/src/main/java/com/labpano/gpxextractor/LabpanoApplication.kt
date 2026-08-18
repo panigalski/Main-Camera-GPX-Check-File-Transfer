@@ -7,6 +7,8 @@ import com.labpano.gpxextractor.monitor.CameraRecordingStatusRegistry
 import com.labpano.gpxextractor.monitor.PilotFragmentStorageFileObserver
 import com.labpano.gpxextractor.monitor.PilotFragmentStorageSettingsReader
 import com.labpano.gpxextractor.api.DeviceDiagnosticsRegistry
+import com.labpano.gpxextractor.output.ProcessingFolderCleanup
+import com.labpano.gpxextractor.report.GlobalOutputReportStore
 import com.labpano.gpxextractor.monitor.RecordingMonitorService
 import com.labpano.gpxextractor.ui.MainActivity
 import com.labpano.gpxextractor.wifi.WifiFileServerService
@@ -36,6 +38,12 @@ class LabpanoApplication : Application() {
         PilotFragmentStorageFileObserver.ensureWatching(this)
         PilotFragmentStorageSettingsReader.refresh(this, force = true)
         DeviceDiagnosticsRegistry.ensureStarted(this)
+        val outputReports = GlobalOutputReportStore(this)
+        ProcessingFolderCleanup.cleanup(this, outputReports.currentDestination())
+        // Best-effort report preparation: ensure cumulative root reports exist and backfill them
+        // from 0.5.45 daily reports when necessary. Monitoring repeats the same validation before
+        // processing, so a temporarily unavailable SAF tree is not fatal here.
+        runCatching { outputReports.ensureReportFiles() }
         installCrashLogger()
     }
 
@@ -68,8 +76,8 @@ class LabpanoApplication : Application() {
             append(trace).append("\n")
         }
 
-        // Keep diagnostics private. The shared recording/output root is intentionally limited to
-        // Root GOOD.TXT, FAILED.TXT and ERROR.TXT plus date/status recording media/GPX files.
+        // Keep diagnostics private. Shared OUTPUT is reserved for classified media/GPX plus
+        // cumulative root reports and daily date/status reports.
         val target = File(filesDir, "CRASH.TXT")
         runCatching {
             target.parentFile?.mkdirs()
