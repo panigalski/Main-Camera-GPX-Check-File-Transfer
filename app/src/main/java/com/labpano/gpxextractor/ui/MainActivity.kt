@@ -14,6 +14,9 @@ import android.graphics.Typeface
 import android.graphics.drawable.GradientDrawable
 import android.graphics.drawable.LayerDrawable
 import android.graphics.drawable.StateListDrawable
+import android.net.ConnectivityManager
+import android.net.Network
+import android.net.NetworkCapabilities
 import android.net.Uri
 import android.net.wifi.WifiManager
 import android.os.Build
@@ -52,6 +55,7 @@ class MainActivity : Activity() {
     private lateinit var wifiUrlView: TextView
     private lateinit var wifiPortButton: Button
     private lateinit var advancedButton: Button
+    private lateinit var connectivityManager: ConnectivityManager
     private lateinit var preferences: SharedPreferences
     private var selectedOutputTreeUri: Uri? = null
     private var selectedRecordingPath: String = ""
@@ -59,6 +63,16 @@ class MainActivity : Activity() {
     private var advancedVisible = false
     private var defaultStatusColor: Int = Color.DKGRAY
     private var monitoringStartPending = false
+    private var networkCallbackRegistered = false
+
+    private val networkCallback = object : ConnectivityManager.NetworkCallback() {
+        override fun onAvailable(network: Network) = refreshNetworkAwareWifiState()
+
+        override fun onLost(network: Network) = refreshNetworkAwareWifiState()
+
+        override fun onCapabilitiesChanged(network: Network, networkCapabilities: NetworkCapabilities) =
+            refreshNetworkAwareWifiState()
+    }
 
     private val statusReceiver = object : BroadcastReceiver() {
         override fun onReceive(context: Context?, intent: Intent?) {
@@ -74,7 +88,8 @@ class MainActivity : Activity() {
         override fun onReceive(context: Context?, intent: Intent?) {
             if (intent?.action != WifiFileServerService.ACTION_SERVER_STATUS) return
             val active = intent.getBooleanExtra(WifiFileServerService.EXTRA_ACTIVE, false)
-            updateWifiServerUi(active)
+            preferences.edit().putBoolean(KEY_WIFI_SERVER_ENABLED, active).apply()
+            synchronizeWifiConnectionState()
             intent.getStringExtra(WifiFileServerService.EXTRA_ERROR)?.takeIf { it.isNotBlank() }?.let {
                 Toast.makeText(this@MainActivity, "Wi-Fi server: $it", Toast.LENGTH_LONG).show()
             }
@@ -85,6 +100,7 @@ class MainActivity : Activity() {
         super.onCreate(savedInstanceState)
         title = getString(com.labpano.gpxextractor.R.string.app_name)
         preferences = getSharedPreferences(PREFERENCES_NAME, Context.MODE_PRIVATE)
+        connectivityManager = getSystemService(Context.CONNECTIVITY_SERVICE) as ConnectivityManager
         if (savedInstanceState == null) forceStoppedStartupState()
         selectedOutputTreeUri = preferences.getString(KEY_OUTPUT_TREE_URI, null)?.let(Uri::parse)
         val storedRecordingPath = preferences.getString(KEY_RECORDING_DIRECTORY, null)
@@ -121,18 +137,20 @@ class MainActivity : Activity() {
         @Suppress("DEPRECATION")
         registerReceiver(statusReceiver, IntentFilter(RecordingMonitorService.ACTION_STATUS_CHANGED))
         registerReceiver(wifiStatusReceiver, IntentFilter(WifiFileServerService.ACTION_SERVER_STATUS))
+        registerNetworkCallback()
         updateStatus(
             preferences.getString(
                 RecordingMonitorService.KEY_LAST_STATUS,
                 RecordingMonitorService.STATUS_IDLE
             ) ?: RecordingMonitorService.STATUS_IDLE
         )
-        updateWifiServerUi(preferences.getBoolean(KEY_WIFI_SERVER_ENABLED, false))
+        synchronizeWifiConnectionState()
     }
 
     override fun onStop() {
         runCatching { unregisterReceiver(statusReceiver) }
         runCatching { unregisterReceiver(wifiStatusReceiver) }
+        unregisterNetworkCallback()
         super.onStop()
     }
 
@@ -172,7 +190,7 @@ class MainActivity : Activity() {
         ) { openDirectoryPicker(OUTPUT_DIRECTORY_PICKER_REQUEST) }
 
         wifiButton = compactButton(
-            label = "START WI-FI FILE ACCESS",
+            label = "START WI-FI CONNECTION",
             violet = true,
             action = { toggleWifiServer() }
         )
@@ -188,7 +206,7 @@ class MainActivity : Activity() {
             orientation = LinearLayout.VERTICAL
             setPadding(0, gap, 0, gap)
             addView(TextView(this@MainActivity).apply {
-                text = "Wi-Fi file access"
+                text = "Wi-Fi connection"
                 textSize = 13f
                 setTypeface(typeface, Typeface.BOLD)
             }, matchWrap())
@@ -213,12 +231,12 @@ class MainActivity : Activity() {
                 commitLocalOutputSelection(AppConfig.defaultOutputDirectory)
             }, mainButtonLayoutParams())
             addView(TextView(this@MainActivity).apply {
-                text = "Wi-Fi file access uses its own TCP port (default 1100). A second camera app can use another port such as 1200 at the same time. Stop Wi-Fi file access before changing this app's port."
+                text = "Wi-Fi connection uses its own TCP port (default 1100). A second camera app can use another port such as 1200 at the same time. The connection control is available only while the camera is connected to a network. Stop Wi-Fi connection before changing this app's port."
                 textSize = 11f
                 setPadding(gap, gap, gap, gap)
             })
             addView(TextView(this@MainActivity).apply {
-                text = "Completed recordings are classified into OUTPUT/dd-mm-yyyy/GOOD/, FAILED/ or ERROR/. OUTPUT keeps cumulative GOOD.TXT, FAILED.TXT and ERROR.TXT reports only for statuses that have occurred, while each status folder contains a dd-mm-yyyy_<STATUS>.txt daily report only when that status occurred that day. Temporary PROCESSING folders are removed when empty."
+                text = "Completed recordings are classified into OUTPUT/dd-mm-yyyy/GOOD/, FAILED/ or ERROR/. OUTPUT keeps cumulative GOOD.TXT, FAILED.TXT and ERROR.TXT reports only for statuses that have occurred; each cumulative report also tracks transferred MP4 count, video hours and MP4 data in GB. Each status folder contains a dd-mm-yyyy_<STATUS>.txt daily report only when that status occurred that day. Temporary PROCESSING folders are removed when empty."
                 textSize = 11f
                 setPadding(gap, gap, gap, gap)
             })
@@ -857,7 +875,7 @@ class MainActivity : Activity() {
 
     private fun showWifiPortDialog() {
         if (preferences.getBoolean(KEY_WIFI_SERVER_ENABLED, false)) {
-            Toast.makeText(this, "Stop Wi-Fi file access before changing the port.", Toast.LENGTH_LONG).show()
+            Toast.makeText(this, "Stop Wi-Fi connection before changing the port.", Toast.LENGTH_LONG).show()
             return
         }
 
@@ -895,34 +913,94 @@ class MainActivity : Activity() {
     }
 
     private fun toggleWifiServer() {
+        if (!isCameraConnectedToNetwork()) {
+            updateWifiServerUi(active = false, networkConnected = false)
+            Toast.makeText(this, "Connect the camera to a network first.", Toast.LENGTH_LONG).show()
+            return
+        }
         val enabled = preferences.getBoolean(KEY_WIFI_SERVER_ENABLED, false)
         if (enabled) stopWifiServer() else startWifiServer()
     }
 
     private fun startWifiServer() {
+        if (!isCameraConnectedToNetwork()) {
+            preferences.edit().putBoolean(KEY_WIFI_SERVER_ENABLED, false).apply()
+            updateWifiServerUi(active = false, networkConnected = false)
+            Toast.makeText(this, "Connect the camera to a network first.", Toast.LENGTH_LONG).show()
+            return
+        }
         preferences.edit().putBoolean(KEY_WIFI_SERVER_ENABLED, true).apply()
         val intent = Intent(this, WifiFileServerService::class.java)
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) startForegroundService(intent) else startService(intent)
-        updateWifiServerUi(true)
-        Toast.makeText(this, "Wi-Fi file access started", Toast.LENGTH_SHORT).show()
+        updateWifiServerUi(active = true, networkConnected = true)
+        Toast.makeText(this, "Wi-Fi connection started", Toast.LENGTH_SHORT).show()
     }
 
     private fun stopWifiServer() {
         preferences.edit().putBoolean(KEY_WIFI_SERVER_ENABLED, false).apply()
         stopService(Intent(this, WifiFileServerService::class.java))
-        updateWifiServerUi(false)
-        Toast.makeText(this, "Wi-Fi file access stopped", Toast.LENGTH_SHORT).show()
+        updateWifiServerUi(active = false, networkConnected = isCameraConnectedToNetwork())
+        Toast.makeText(this, "Wi-Fi connection stopped", Toast.LENGTH_SHORT).show()
     }
 
-    private fun updateWifiServerUi(active: Boolean) {
+    private fun updateWifiServerUi(
+        active: Boolean,
+        networkConnected: Boolean = isCameraConnectedToNetwork()
+    ) {
         if (!::wifiButton.isInitialized || !::wifiUrlView.isInitialized) return
-        wifiButton.text = if (active) "STOP WI-FI FILE ACCESS" else "START WI-FI FILE ACCESS"
-        wifiUrlView.visibility = if (active) View.VISIBLE else View.GONE
-        wifiUrlView.text = if (active) {
-            val address = localIpv4Address()
-            if (address == null) "Connect camera to Wi-Fi" else "http://$address:${currentWifiPort()}"
+        val state = WifiConnectionUiPolicy.resolve(networkConnected, active)
+        wifiButton.text = state.buttonText
+        wifiButton.isEnabled = state.buttonEnabled
+        wifiButton.alpha = if (state.buttonEnabled) 1f else 0.45f
+        wifiUrlView.visibility = if (state.showUrl) View.VISIBLE else View.GONE
+        wifiUrlView.text = if (state.showUrl) {
+            localIpv4Address()?.let { "http://$it:${currentWifiPort()}" } ?: ""
         } else ""
-        wifiUrlView.setTextColor(if (active) Color.rgb(0, 128, 0) else defaultStatusColor)
+        wifiUrlView.setTextColor(if (state.showUrl) Color.rgb(0, 128, 0) else defaultStatusColor)
+    }
+
+    private fun registerNetworkCallback() {
+        if (networkCallbackRegistered || !::connectivityManager.isInitialized) return
+        runCatching {
+            connectivityManager.registerDefaultNetworkCallback(networkCallback)
+        }.onSuccess {
+            networkCallbackRegistered = true
+        }
+    }
+
+    private fun unregisterNetworkCallback() {
+        if (!networkCallbackRegistered || !::connectivityManager.isInitialized) return
+        runCatching { connectivityManager.unregisterNetworkCallback(networkCallback) }
+        networkCallbackRegistered = false
+    }
+
+    private fun refreshNetworkAwareWifiState() {
+        runOnUiThread { synchronizeWifiConnectionState() }
+    }
+
+    private fun synchronizeWifiConnectionState() {
+        val connected = isCameraConnectedToNetwork()
+        val active = preferences.getBoolean(KEY_WIFI_SERVER_ENABLED, false)
+        if (!connected && active) {
+            preferences.edit().putBoolean(KEY_WIFI_SERVER_ENABLED, false).apply()
+            stopService(Intent(this, WifiFileServerService::class.java))
+            Toast.makeText(
+                this,
+                "Wi-Fi connection stopped because the camera is no longer connected to a network.",
+                Toast.LENGTH_LONG
+            ).show()
+        }
+        updateWifiServerUi(active = active && connected, networkConnected = connected)
+    }
+
+    private fun isCameraConnectedToNetwork(): Boolean {
+        if (!::connectivityManager.isInitialized) return false
+        val network = connectivityManager.activeNetwork ?: return false
+        val capabilities = connectivityManager.getNetworkCapabilities(network) ?: return false
+        val supportedTransport = capabilities.hasTransport(NetworkCapabilities.TRANSPORT_WIFI) ||
+            capabilities.hasTransport(NetworkCapabilities.TRANSPORT_ETHERNET) ||
+            capabilities.hasTransport(NetworkCapabilities.TRANSPORT_BLUETOOTH)
+        return supportedTransport && localIpv4Address() != null
     }
 
     private fun localIpv4Address(): String? {

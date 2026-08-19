@@ -9,7 +9,7 @@ import com.labpano.gpxextractor.wifi.WifiFileServerService
 
 /**
  * Boot / app-update policy: never auto-connect and never auto-monitor.
- * The user must explicitly start Monitoring and Wi-Fi file access from the main UI after startup.
+ * The user must explicitly start Monitoring and Wi-Fi connection from the main UI after startup.
  */
 class BootReceiver : BroadcastReceiver() {
     override fun onReceive(context: Context, intent: Intent) {

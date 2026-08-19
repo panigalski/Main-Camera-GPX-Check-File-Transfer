@@ -1,6 +1,6 @@
 # Current Output Folder contract
 
-Main App 0.5.47 uses a **date-first** classified output structure while retaining cumulative reports in the OUTPUT root:
+Main App 0.5.49 uses a **date-first** classified output structure while retaining cumulative reports in the OUTPUT root:
 
 ```text
 OUTPUT/
@@ -47,7 +47,7 @@ Classification is determined before GPX densification. Interpolation cannot conv
 
 ## Reports
 
-- Root reports are cumulative across all recording days, but each one is created only after the first recording of that status: no GOOD recordings means no `GOOD.TXT`, and likewise for FAILED/ERROR.
+- Root reports are cumulative across all recording days, but each one is created only after the first recording of that status: no GOOD recordings means no `GOOD.TXT`, and likewise for FAILED/ERROR. Each root report begins with a transfer summary containing MP4 file count, total MP4 recording hours, and total MP4 bytes expressed as decimal GB (1 GB = 1,000,000,000 bytes).
 - A daily `dd-MM-yyyy_<STATUS>.txt` report is created only after the first recording of that status on that date. Empty status reports are never pre-created.
 - Each committed recording is appended to both the matching root cumulative report and matching daily report.
 - There are **no per-recording/per-segment TXT files**.
@@ -61,4 +61,4 @@ Client 1.10.32 sends only per-video `_backup.gpx` files. Main resolves each uplo
 
 ## Temporary PROCESSING folder cleanup
 
-`PROCESSING` is an internal state, not an Output Folder classification. Main App 0.5.47 does not create `OUTPUT/dd-MM-yyyy/PROCESSING/`. Empty legacy `PROCESSING` directories are removed automatically. A non-empty legacy directory is preserved to avoid deleting unknown user data.
+`PROCESSING` is an internal state, not an Output Folder classification. Main App 0.5.49 does not create `OUTPUT/dd-MM-yyyy/PROCESSING/`. Empty legacy `PROCESSING` directories are removed automatically. A non-empty legacy directory is preserved to avoid deleting unknown user data.

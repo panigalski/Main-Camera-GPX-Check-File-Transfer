@@ -1,3 +1,18 @@
+## 0.5.49
+
+- Added cumulative transfer totals to root `GOOD.TXT`, `FAILED.TXT`, and `ERROR.TXT`: MP4 files transferred, total video-recording hours, and MP4 data transferred in decimal GB.
+- Store MP4 byte size and canonical video duration as machine-readable metadata on new report entries so retries/recovery do not double-count totals.
+- Keep summary lines out of dashboard/report-entry APIs and daily-report migration so Client compatibility and date/status reports remain unchanged.
+- Rebuild global summaries on startup, append, recovery, and report-entry deletion; legacy entries expose statistics coverage when old metadata cannot be recovered safely.
+
+## 0.5.48
+
+- Renamed the main Wi-Fi control to `START WI-FI CONNECTION` / `STOP WI-FI CONNECTION`.
+- Disable and grey the Wi-Fi connection button when the camera has no active Wi-Fi/Ethernet/Bluetooth network with a usable local IPv4 address.
+- Re-enable the button automatically when a usable camera network becomes available.
+- Stop the Wi-Fi file-server service automatically if the camera loses its network while the service is active.
+- Keep the stored Wi-Fi server state synchronized with service status broadcasts so a failed/stopped server cannot leave a stale enabled preference.
+
 ## 0.5.47
 
 - Create GOOD/FAILED/ERROR report files lazily: no global or daily report exists until at least one recording of that status is committed.

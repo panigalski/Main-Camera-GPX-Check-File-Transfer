@@ -2,7 +2,7 @@
 
 Android application for the Labpano Pilot One that monitors completed MP4 recordings, extracts CAMM GPS metadata, validates GPX timing, organizes processed recordings, and exposes the local API used by the companion smartphone client.
 
-**Current release:** 0.5.47 (`versionCode 70`)  
+**Current release:** 0.5.49 (`versionCode 72`)  
 **Package:** `com.labpano.gpxextractor`  
 **Minimum Android:** 7.0 / API 24  
 **Target / compile SDK:** API 28  
@@ -18,9 +18,10 @@ Android application for the Labpano Pilot One that monitors completed MP4 record
   - maximum real CAMM gap `> 5.000 s` → **FAILED**
   - extraction, validation, or permanent processing failure → **ERROR**
 - Writes GPX 1.1 files for processed recordings.
-- Maintains cumulative root and daily status reports, created only when that status actually occurs.
+- Maintains cumulative root and daily status reports, created only when that status actually occurs. Each cumulative root report begins with transfer totals for MP4 count, video hours, and MP4 data in decimal GB.
 - Publishes dashboard/live status used by the Client, including recording state, transfers, Fragment Storage diagnostics, reports, storage and device information.
 - Accepts the Client's manual, checksum-verified `_backup.gpx` uploads into the matching date/status folder.
+- Provides a network-aware **START / STOP WI-FI CONNECTION** control. The button is disabled when the camera has no usable local network connection, and an active Wi-Fi connection service is stopped automatically if that network is lost.
 
 ## Output Folder layout
 
@@ -47,7 +48,7 @@ OUTPUT/
         └── <video>_backup.gpx          # optional Client upload
 ```
 
-A root report exists only after the first recording of that status. A daily report exists only after that status occurs on that date. The same committed recording entry is written to both levels. There are no per-video/per-segment TXT files. Empty legacy `PROCESSING` folders are removed automatically.
+A root report exists only after the first recording of that status. A daily report exists only after that status occurs on that date. The same committed recording entry is written to both levels. Global root reports also contain a `# TRANSFER SUMMARY` block with MP4 files transferred, recording hours transferred, and MP4 data transferred in decimal GB. There are no per-video/per-segment TXT files. Empty legacy `PROCESSING` folders are removed automatically.
 
 See [docs/OUTPUT-LAYOUT.md](docs/OUTPUT-LAYOUT.md) for the current folder contract.
 

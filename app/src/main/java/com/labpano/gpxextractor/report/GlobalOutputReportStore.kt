@@ -82,6 +82,9 @@ class GlobalOutputReportStore(private val context: Context) {
                     statuses.forEach { status -> backfillLocalRootFromDaily(destination.directory, status) }
                     if (needsDualLayoutMigration) reconcileLocalDailyFromRoot(destination.directory)
                     cleanupEmptyLocalPlaceholderReports(destination.directory)
+                    statuses.forEach { status ->
+                        localRootReportFile(destination.directory, status).takeIf { it.isFile }?.let(::refreshLocalRootSummary)
+                    }
                 }
                 destination.treeUri != null -> {
                     verifyTreeRoot(destination.treeUri)
@@ -89,6 +92,11 @@ class GlobalOutputReportStore(private val context: Context) {
                     statuses.forEach { status -> backfillTreeRootFromDaily(destination.treeUri, status) }
                     if (needsDualLayoutMigration) reconcileTreeDailyFromRoot(destination.treeUri)
                     cleanupEmptyTreePlaceholderReports(destination.treeUri)
+                    statuses.forEach { status ->
+                        findTreeRootReport(context.contentResolver, destination.treeUri, status)?.let {
+                            refreshTreeRootSummary(context.contentResolver, it)
+                        }
+                    }
                 }
                 else -> throw IOException("Output report destination is not configured")
             }
@@ -127,13 +135,20 @@ class GlobalOutputReportStore(private val context: Context) {
         message: String,
         transactionId: String?,
         destination: Destination,
-        outputDate: String = DatedOutputLayout.forRecording(File(sourcePath).name).date
+        outputDate: String = DatedOutputLayout.forRecording(File(sourcePath).name).date,
+        videoSizeBytes: Long? = null,
+        videoDurationMillis: Long? = null
     ) = synchronized(ReportFileAccess.lock) {
         requireReportStatus(status)
         requireValidDate(outputDate)
         try {
             val marker = transactionId?.let { "transactionId=$it" }
-            val line = "${utcTimestamp()}\t${sanitize(sourcePath)}\t${sanitize(message)}\n"
+            val messageWithMetrics = TransferReportSummaryCodec.withMetrics(
+                message = message,
+                videoBytes = videoSizeBytes,
+                videoDurationMillis = videoDurationMillis
+            )
+            val line = "${utcTimestamp()}\t${sanitize(sourcePath)}\t${sanitize(messageWithMetrics)}\n"
             when {
                 destination.directory != null -> appendLocal(destination.directory, outputDate, status, line, marker)
                 destination.treeUri != null -> appendTree(destination.treeUri, outputDate, status, line, marker)
@@ -209,6 +224,7 @@ class GlobalOutputReportStore(private val context: Context) {
         val rootReport = ensureLocalRootReport(root, status)
         if (marker == null || !containsMarkerLocal(dailyReport, marker)) appendLocalLine(dailyReport, line)
         if (marker == null || !containsMarkerLocal(rootReport, marker)) appendLocalLine(rootReport, line)
+        refreshLocalRootSummary(rootReport)
     }
 
     private fun appendLocalLine(report: File, line: String) {
@@ -224,6 +240,7 @@ class GlobalOutputReportStore(private val context: Context) {
         val rootReport = ensureTreeRootReport(treeUri, status)
         if (marker == null || !containsMarkerTree(resolver, dailyReport, marker)) appendTreeLine(resolver, dailyReport, line)
         if (marker == null || !containsMarkerTree(resolver, rootReport, marker)) appendTreeLine(resolver, rootReport, line)
+        refreshTreeRootSummary(resolver, rootReport)
     }
 
     private fun appendTreeLine(resolver: ContentResolver, report: Uri, line: String) {
@@ -250,7 +267,7 @@ class GlobalOutputReportStore(private val context: Context) {
         val ring = ArrayDeque<String>(maxLines.coerceAtLeast(1))
         report.bufferedReader(Charsets.UTF_8).useLines { sequence ->
             sequence.forEach { line ->
-                if (line.isNotBlank()) {
+                if (TransferReportSummaryCodec.isDetailLine(line)) {
                     if (ring.size >= maxLines) ring.removeFirst()
                     ring.addLast(line)
                 }
@@ -265,7 +282,7 @@ class GlobalOutputReportStore(private val context: Context) {
         val ring = ArrayDeque<String>(maxLines.coerceAtLeast(1))
         resolver.openInputStream(report)?.bufferedReader(Charsets.UTF_8)?.useLines { sequence ->
             sequence.forEach { line ->
-                if (line.isNotBlank()) {
+                if (TransferReportSummaryCodec.isDetailLine(line)) {
                     if (ring.size >= maxLines) ring.removeFirst()
                     ring.addLast(line)
                 }
@@ -285,6 +302,7 @@ class GlobalOutputReportStore(private val context: Context) {
             val rootReport = localRootReportFile(root, status)
             val rootResult = if (rootReport.isFile) rewriteLocalReportWithoutLine(rootReport, expectedLine)
                 else DeleteResult(false, 404, "Root report entry no longer exists")
+            if (rootResult.deleted) refreshLocalRootSummary(rootReport)
             if (rootResult.deleted || rootResult.statusCode == 404) return DeleteResult(true, 200, "Entry deleted")
 
             // Keep the two report levels consistent if the root rewrite failed.
@@ -340,6 +358,7 @@ class GlobalOutputReportStore(private val context: Context) {
             } else {
                 DeleteResult(false, 404, "Root report entry no longer exists")
             }
+            if (rootResult.deleted && rootReport != null) refreshTreeRootSummary(resolver, rootReport)
             if (rootResult.deleted || rootResult.statusCode == 404) return DeleteResult(true, 200, "Entry deleted")
 
             // Restore the daily copy if the cumulative root copy could not be updated.
@@ -402,7 +421,7 @@ class GlobalOutputReportStore(private val context: Context) {
             val rootReport = localRootReportFile(root, status)
             if (!rootReport.isFile || !rootReport.canRead()) return@forEach
             rootReport.useLines(Charsets.UTF_8) { lines ->
-                lines.filter { it.isNotBlank() }.forEach { line ->
+                lines.filter(TransferReportSummaryCodec::isDetailLine).forEach { line ->
                     val date = dateForLegacyLine(line)
                     val dailyReport = ensureLocalDailyReport(root, date, status)
                     if (!containsExactLineLocal(dailyReport, line)) appendLocalLine(dailyReport, line + "\n")
@@ -416,7 +435,7 @@ class GlobalOutputReportStore(private val context: Context) {
         statuses.forEach { status ->
             val rootReport = findTreeRootReport(resolver, treeUri, status) ?: return@forEach
             val lines = resolver.openInputStream(rootReport)?.bufferedReader(Charsets.UTF_8)?.use { reader ->
-                reader.lineSequence().filter { it.isNotBlank() }.toList()
+                reader.lineSequence().filter(TransferReportSummaryCodec::isDetailLine).toList()
             } ?: emptyList()
             lines.forEach { line ->
                 val date = dateForLegacyLine(line)
@@ -507,7 +526,7 @@ class GlobalOutputReportStore(private val context: Context) {
             val candidates = listOf(File(File(root, status.name), "${status.name}.TXT"))
             candidates.distinctBy { it.absolutePath }.forEach legacyLoop@ { legacy ->
                 if (!legacy.isFile || !legacy.canRead()) return@legacyLoop
-                val lines = legacy.readLines(Charsets.UTF_8).filter { it.isNotBlank() }
+                val lines = legacy.readLines(Charsets.UTF_8).filter(TransferReportSummaryCodec::isDetailLine)
                 lines.forEach { line -> migrateLegacyLocalLine(root, status, line) }
                 if (!legacy.delete()) throw IOException("Cannot remove migrated legacy report: ${legacy.absolutePath}")
                 legacy.parentFile?.takeIf { it != root && it.isDirectory && it.list()?.isEmpty() == true }?.delete()
@@ -534,7 +553,7 @@ class GlobalOutputReportStore(private val context: Context) {
             }
             candidates.distinct().forEach { legacy ->
                 val lines = resolver.openInputStream(legacy)?.bufferedReader(Charsets.UTF_8)?.use { reader ->
-                    reader.lineSequence().filter { it.isNotBlank() }.toList()
+                    reader.lineSequence().filter(TransferReportSummaryCodec::isDetailLine).toList()
                 } ?: emptyList()
                 lines.forEach { line ->
                     val date = dateForLegacyLine(line)
@@ -563,7 +582,9 @@ class GlobalOutputReportStore(private val context: Context) {
             val hasDailyContent = localDateDirectories(root).any { dateDir ->
                 localReportFile(root, dateDir.name, status).takeIf { it.isFile }?.length()?.let { it > 0L } == true
             }
-            if (rootReport.isFile && rootReport.length() == 0L && !hasAnyMp4 && !hasDailyContent) rootReport.delete()
+            val hasRootEntries = rootReport.isFile && rootReport.canRead() &&
+                rootReport.useLines(Charsets.UTF_8) { lines -> lines.any(TransferReportSummaryCodec::isDetailLine) }
+            if (rootReport.isFile && !hasRootEntries && !hasAnyMp4 && !hasDailyContent) rootReport.delete()
         }
     }
 
@@ -584,7 +605,7 @@ class GlobalOutputReportStore(private val context: Context) {
                 }
             }
             val rootReport = findTreeRootReport(resolver, treeUri, status)
-            if (rootReport != null && !treeReportHasNonBlankLine(resolver, rootReport)) {
+            if (rootReport != null && !treeReportHasDetailLine(resolver, rootReport)) {
                 val hasAnyMp4 = dateEntries.any { dateEntry ->
                     val statusDir = findTreeChild(resolver, treeUri, dateEntry.uri, status.name) ?: return@any false
                     listTreeChildren(resolver, treeUri, statusDir).any {
@@ -759,6 +780,59 @@ class GlobalOutputReportStore(private val context: Context) {
             lastOperation = diagnostic.lastOperation, lastError = diagnostic.lastError
         )
     }
+
+    private fun refreshLocalRootSummary(report: File) {
+        if (!report.isFile || !report.canRead() || !report.canWrite()) return
+        val detailLines = report.readLines(Charsets.UTF_8).filter(TransferReportSummaryCodec::isDetailLine)
+        val summary = TransferReportSummaryCodec.calculate(detailLines.asSequence()) { entry ->
+            val destination = entry.destination ?: return@calculate null
+            val videoName = entry.videoName ?: return@calculate null
+            File(destination, videoName).takeIf { it.isFile }?.length()
+        }
+        val temporary = File(report.parentFile, ".${report.name}.summary-${System.nanoTime()}.tmp")
+        val backup = File(report.parentFile, ".${report.name}.summary-backup")
+        try {
+            FileOutputStream(temporary).bufferedWriter(Charsets.UTF_8).use { writer ->
+                TransferReportSummaryCodec.render(summary).forEach { writer.append(it).append('\n') }
+                detailLines.forEach { writer.append(it).append('\n') }
+                writer.flush()
+            }
+            java.io.RandomAccessFile(temporary, "rw").use { it.fd.sync() }
+            if (backup.exists()) backup.delete()
+            if (!report.renameTo(backup)) throw IOException("Cannot preserve root report before summary refresh")
+            if (!temporary.renameTo(report)) {
+                backup.renameTo(report)
+                throw IOException("Cannot replace root report summary")
+            }
+            backup.delete()
+        } finally {
+            temporary.delete()
+            if (!report.exists() && backup.exists()) backup.renameTo(report)
+        }
+    }
+
+    private fun refreshTreeRootSummary(resolver: ContentResolver, report: Uri) {
+        val detailLines = resolver.openInputStream(report)?.bufferedReader(Charsets.UTF_8)?.use { reader ->
+            reader.lineSequence().filter(TransferReportSummaryCodec::isDetailLine).toList()
+        } ?: emptyList()
+        val summary = TransferReportSummaryCodec.calculate(detailLines.asSequence())
+        val temporary = File(context.cacheDir, "root-report-summary-${System.nanoTime()}.txt")
+        try {
+            FileOutputStream(temporary).bufferedWriter(Charsets.UTF_8).use { writer ->
+                TransferReportSummaryCodec.render(summary).forEach { writer.append(it).append('\n') }
+                detailLines.forEach { writer.append(it).append('\n') }
+                writer.flush()
+            }
+            writeWholeTreeDocument(resolver, report, temporary)
+        } finally {
+            temporary.delete()
+        }
+    }
+
+    private fun treeReportHasDetailLine(resolver: ContentResolver, report: Uri): Boolean =
+        resolver.openInputStream(report)?.bufferedReader(Charsets.UTF_8)?.useLines { lines ->
+            lines.any(TransferReportSummaryCodec::isDetailLine)
+        } ?: false
 
     private fun documentSize(uri: Uri): Long {
         var cursor: Cursor? = null

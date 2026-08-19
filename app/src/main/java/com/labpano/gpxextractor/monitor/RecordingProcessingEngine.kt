@@ -694,7 +694,11 @@ class RecordingProcessingEngine(
             message = entry.message,
             transactionId = duplicateMarker,
             destination = reportDestination,
-            outputDate = entry.outputDate
+            outputDate = entry.outputDate,
+            videoSizeBytes = entry.sourceSize,
+            videoDurationMillis = if (entry.videoStartMillis != null && entry.videoEndMillis != null &&
+                entry.videoEndMillis > entry.videoStartMillis
+            ) entry.videoEndMillis - entry.videoStartMillis else null
         )
         ProcessingFolderCleanup.cleanup(context, reportDestination)
         val validVideoInterval = entry.videoStartMillis != null && entry.videoEndMillis != null &&

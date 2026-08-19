@@ -934,7 +934,7 @@ a{color:#075fa8;text-decoration:none;word-break:break-word}small{display:block;c
         if (Build.VERSION.SDK_INT < Build.VERSION_CODES.O) return
         val manager = getSystemService(NotificationManager::class.java)
         manager.createNotificationChannel(NotificationChannel(
-            CHANNEL_ID, "Wi-Fi file access", NotificationManager.IMPORTANCE_LOW
+            CHANNEL_ID, "Wi-Fi connection", NotificationManager.IMPORTANCE_LOW
         ))
     }
 
@@ -947,7 +947,7 @@ a{color:#075fa8;text-decoration:none;word-break:break-word}small{display:block;c
             Notification.Builder(this, CHANNEL_ID)
         } else @Suppress("DEPRECATION") Notification.Builder(this)
         return builder.setSmallIcon(R.drawable.ic_app)
-            .setContentTitle("Labpano Wi-Fi file access")
+            .setContentTitle("Labpano Wi-Fi connection")
             .setContentText("File access and GPX upload available on port $listenPort")
             .setContentIntent(pendingIntent).setOngoing(true).build()
     }
